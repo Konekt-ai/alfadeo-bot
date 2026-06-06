@@ -1,0 +1,109 @@
+-- =====================================================================
+-- ESQUEMA DE REFERENCIA — ALFA-DEO bot de WhatsApp
+-- =====================================================================
+-- IMPORTANTE: el esquema REAL se administra directamente en Supabase.
+-- Este archivo es SÓLO una referencia para el desarrollo del bot; el bot
+-- NO crea ni migra tablas. No ejecutes este archivo contra producción
+-- a menos que sepas exactamente lo que haces.
+--
+-- Se incluye como documentación de las tablas y enums que el bot consume.
+-- =====================================================================
+
+-- ----------------------- ENUMS (referencia) --------------------------
+-- tipo de cliente:      hospital | clinica | farmacia | gobierno | distribuidor | medico | otro
+-- canal de solicitud:   incluye 'whatsapp' (entre otros)
+-- estado de solicitud:  nueva | en_revision | cotizada | enviada | aceptada | rechazada | facturada | cancelada
+-- urgencia:             normal | urgente | programada
+-- direccion de mensaje: in | out
+
+-- ----------------------- TABLAS (referencia) -------------------------
+
+-- productos: catálogo. precio_base es interno y NUNCA se expone al cliente.
+-- CREATE TABLE productos (
+--   id            uuid PRIMARY KEY,
+--   clave         text,
+--   nombre        text,
+--   descripcion   text,
+--   laboratorio   text,
+--   presentacion  text,
+--   unidad        text,
+--   categoria     text,
+--   precio_base   numeric,      -- interno, no exponer
+--   iva_exento    boolean,
+--   controlado    boolean,      -- si true => escalar a humano
+--   activo        boolean
+-- );
+
+-- inventario: existencia REFERENCIAL, sujeta a confirmación.
+-- CREATE TABLE inventario (
+--   id            uuid PRIMARY KEY,
+--   producto_id   uuid REFERENCES productos(id),
+--   ubicacion_id  uuid REFERENCES ubicaciones(id),
+--   existencia    numeric
+-- );
+
+-- ubicaciones:
+-- CREATE TABLE ubicaciones (
+--   id        uuid PRIMARY KEY,
+--   nombre    text,
+--   direccion text,
+--   ciudad    text,
+--   estado    text
+-- );
+
+-- clientes: upsert por telefono_wa.
+-- CREATE TABLE clientes (
+--   id          uuid PRIMARY KEY,
+--   nombre      text,
+--   empresa     text,
+--   tipo        text,           -- enum tipo cliente
+--   ciudad      text,
+--   telefono_wa text UNIQUE,    -- clave de upsert del bot
+--   correo      text
+-- );
+
+-- solicitudes:
+-- CREATE TABLE solicitudes (
+--   id              uuid PRIMARY KEY,
+--   folio           text,
+--   cliente_id      uuid REFERENCES clientes(id),
+--   canal           text,       -- 'whatsapp'
+--   estado          text,       -- 'nueva' al crearse
+--   urgencia        text,       -- enum urgencia
+--   ciudad_entrega  text,
+--   responsable     text,
+--   requiere_humano boolean,
+--   notas           text
+-- );
+
+-- solicitud_items:
+-- CREATE TABLE solicitud_items (
+--   id                uuid PRIMARY KEY,
+--   solicitud_id      uuid REFERENCES solicitudes(id),
+--   producto_id       uuid REFERENCES productos(id),  -- opcional (texto libre)
+--   descripcion_libre text,
+--   cantidad          numeric,
+--   unidad            text,
+--   nota              text
+-- );
+
+-- conversaciones: estado del bot por número (máquina de estados).
+-- CREATE TABLE conversaciones (
+--   wa_id                   text PRIMARY KEY,
+--   cliente_id              uuid REFERENCES clientes(id),
+--   paso                    text,
+--   contexto                jsonb,
+--   ventana_servicio_expira timestamptz,
+--   ultima_actividad        timestamptz
+-- );
+
+-- mensajes: log de toda la conversación.
+-- CREATE TABLE mensajes (
+--   id         uuid PRIMARY KEY,
+--   wa_id      text,
+--   direccion  text,        -- 'in' | 'out'
+--   tipo       text,
+--   cuerpo     text,
+--   payload    jsonb,
+--   created_at timestamptz DEFAULT now()
+-- );

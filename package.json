@@ -1,0 +1,21 @@
+{
+  "name": "alfadeo-bot",
+  "version": "1.0.0",
+  "description": "Webhook de bot de WhatsApp para ALFA-DEO (distribuidora farmacéutica B2B)",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
