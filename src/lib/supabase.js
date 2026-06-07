@@ -2,6 +2,7 @@
 // IMPORTANTE: la Service Role Key omite las políticas RLS, por eso este cliente
 // vive SOLO en el servidor y nunca se expone al cliente/navegador.
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 import { env } from '../config/env.js';
 
 export const supabase = createClient(
@@ -12,6 +13,7 @@ export const supabase = createClient(
       persistSession: false,
       autoRefreshToken: false,
     },
+    realtime: { transport: ws },
   }
 );
 
