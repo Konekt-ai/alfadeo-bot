@@ -46,20 +46,6 @@ export function normalizarUrgencia(texto) {
 }
 
 /**
- * Genera un folio legible y razonablemente único.
- * Formato: AD-AAAAMMDD-XXXX (XXXX aleatorio en base36).
- * @returns {string}
- */
-export function generarFolio() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const rnd = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `AD-${yyyy}${mm}${dd}-${rnd}`;
-}
-
-/**
  * Upsert de cliente por telefono_wa. Si ya existe, actualiza datos no vacíos.
  * @param {object} datos
  * @param {string} datos.telefono_wa
@@ -68,6 +54,11 @@ export function generarFolio() {
  * @param {string} [datos.tipo]
  * @param {string} [datos.ciudad]
  * @param {string} [datos.correo]
+ * @param {string} [datos.direccion]       dirección de la empresa
+ * @param {string} [datos.puesto]          cargo del contacto
+ * @param {string} [datos.rfc]
+ * @param {string} [datos.telefono]        teléfono (distinto al WhatsApp)
+ * @param {string} [datos.especificacion]  especificación del cliente
  * @returns {Promise<object|null>} fila del cliente o null si falla
  */
 export async function upsertCliente(datos) {
@@ -78,6 +69,11 @@ export async function upsertCliente(datos) {
     tipo: datos.tipo ?? 'otro',
     ciudad: datos.ciudad ?? null,
     correo: datos.correo ?? null,
+    direccion: datos.direccion ?? null,
+    puesto: datos.puesto ?? null,
+    rfc: datos.rfc ?? null,
+    telefono: datos.telefono ?? null,
+    especificacion: datos.especificacion ?? null,
   };
 
   // Quitamos llaves nulas para no pisar datos previos con null en un upsert.
@@ -106,16 +102,19 @@ export async function upsertCliente(datos) {
  * @param {string} params.urgencia - 'normal' | 'urgente' | 'programada'
  * @param {boolean} params.requiere_humano
  * @param {string} [params.notas]
- * @param {Array<{descripcion_libre: string, cantidad: number, unidad?: string, producto_id?: string, nota?: string}>} params.items
+ * @param {string} [params.direccion_entrega]
+ * @param {string} [params.tiempo_entrega]       plazo requerido
+ * @param {string} [params.vigencia_cotizacion]
+ * @param {string} [params.nivel_urgencia]       texto crudo del nivel de urgencia
+ * @param {Array<{descripcion_libre: string, cantidad: number, unidad?: string, producto_id?: string, nota?: string, categoria?: string, marca?: string, presentacion?: string}>} params.items
  * @returns {Promise<{solicitud: object, folio: string}|null>}
  */
 export async function crearSolicitudConItems(params) {
-  const folio = generarFolio();
-
+  // NO enviamos `folio`: en la BD es una columna identidad (GENERATED ALWAYS),
+  // la genera Supabase automáticamente. Lo leemos de vuelta con .select().
   const { data: solicitud, error: errSol } = await supabase
     .from('solicitudes')
     .insert({
-      folio,
       cliente_id: params.cliente_id,
       canal: 'whatsapp',
       estado: 'nueva',
@@ -123,6 +122,10 @@ export async function crearSolicitudConItems(params) {
       ciudad_entrega: params.ciudad_entrega ?? null,
       requiere_humano: !!params.requiere_humano,
       notas: params.notas ?? null,
+      direccion_entrega: params.direccion_entrega ?? null,
+      tiempo_entrega: params.tiempo_entrega ?? null,
+      vigencia_cotizacion: params.vigencia_cotizacion ?? null,
+      nivel_urgencia: params.nivel_urgencia ?? null,
     })
     .select()
     .single();
@@ -132,6 +135,9 @@ export async function crearSolicitudConItems(params) {
     return null;
   }
 
+  // El folio definitivo es el que asignó la base de datos.
+  const folio = solicitud.folio;
+
   const items = (params.items ?? []).map((it) => ({
     solicitud_id: solicitud.id,
     producto_id: it.producto_id ?? null,
@@ -139,6 +145,9 @@ export async function crearSolicitudConItems(params) {
     cantidad: it.cantidad ?? null,
     unidad: it.unidad ?? null,
     nota: it.nota ?? null,
+    categoria: it.categoria ?? null,
+    marca: it.marca ?? null,
+    presentacion: it.presentacion ?? null,
   }));
 
   if (items.length > 0) {

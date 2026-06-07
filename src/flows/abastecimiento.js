@@ -31,12 +31,21 @@ const PASO = {
   CAP_TIPO: 'cap_tipo',
   CAP_CIUDAD: 'cap_ciudad',
   CAP_PRODUCTO: 'cap_producto',
+  CAP_CATEGORIA: 'cap_categoria',
   CAP_CANTIDAD: 'cap_cantidad',
+  CAP_MARCA: 'cap_marca',
   CAP_URGENCIA: 'cap_urgencia',
+  CAP_TIEMPO: 'cap_tiempo',
+  CAP_DIRECCION: 'cap_direccion',
   CAP_CONTACTO: 'cap_contacto',
   CONFIRMAR: 'confirmar',
   FIN: 'fin',
 };
+
+// Palabras que el usuario puede usar para SALTAR un campo opcional.
+function esOmitir(texto) {
+  return /^(no|ninguna|ninguno|n\/a|na|-|skip|omitir|sin)\b/i.test((texto || '').trim());
+}
 
 // ===================== Persistencia de la conversación =====================
 
@@ -283,6 +292,16 @@ async function procesarPaso({ wa_id, texto, paso, contexto, cliente_id }) {
 
     case PASO.CAP_PRODUCTO: {
       contexto.producto = texto;
+      await responder(
+        wa_id,
+        '¿En qué *categoría* entra? (ej. medicamento, material de curación, laboratorio…)\n_Si no sabes, escribe *no*._'
+      );
+      await guardarConversacion(wa_id, PASO.CAP_CATEGORIA, contexto, cliente_id);
+      return;
+    }
+
+    case PASO.CAP_CATEGORIA: {
+      contexto.categoria = esOmitir(texto) ? null : texto;
       await responder(wa_id, '¿Qué *cantidad* necesitas? (indica un número)');
       await guardarConversacion(wa_id, PASO.CAP_CANTIDAD, contexto, cliente_id);
       return;
@@ -294,6 +313,16 @@ async function procesarPaso({ wa_id, texto, paso, contexto, cliente_id }) {
       contexto.cantidadTexto = texto;
       await responder(
         wa_id,
+        '¿Necesitas alguna *marca o presentación* específica? (ej. caja c/30, 500ml, marca X)\n_Si no, escribe *no*._'
+      );
+      await guardarConversacion(wa_id, PASO.CAP_MARCA, contexto, cliente_id);
+      return;
+    }
+
+    case PASO.CAP_MARCA: {
+      contexto.marca = esOmitir(texto) ? null : texto;
+      await responder(
+        wa_id,
         '¿Qué *urgencia* tiene? (normal, urgente o programada)'
       );
       await guardarConversacion(wa_id, PASO.CAP_URGENCIA, contexto, cliente_id);
@@ -303,6 +332,28 @@ async function procesarPaso({ wa_id, texto, paso, contexto, cliente_id }) {
     case PASO.CAP_URGENCIA: {
       contexto.urgencia = normalizarUrgencia(texto);
       contexto.urgenciaTexto = texto;
+      await responder(
+        wa_id,
+        '¿Para *cuándo* la necesitas? (ej. esta semana, 15 días, fecha específica)'
+      );
+      await guardarConversacion(wa_id, PASO.CAP_TIEMPO, contexto, cliente_id);
+      return;
+    }
+
+    case PASO.CAP_TIEMPO: {
+      contexto.tiempoEntrega = esOmitir(texto) ? null : texto;
+      await responder(
+        wa_id,
+        '¿*Dirección de entrega*? (calle, número, colonia, CP)\n_Si es la misma de tu empresa, escribe *misma*._'
+      );
+      await guardarConversacion(wa_id, PASO.CAP_DIRECCION, contexto, cliente_id);
+      return;
+    }
+
+    case PASO.CAP_DIRECCION: {
+      contexto.direccionEntrega = /^(misma|igual)\b/i.test((texto || '').trim())
+        ? null
+        : texto;
       await responder(
         wa_id,
         'Por último, déjanos un *correo y/o teléfono* de contacto.'
@@ -365,8 +416,12 @@ function construirResumen(c = {}) {
     `• Tipo: ${c.tipo ?? '—'}\n` +
     `• Ciudad de entrega: ${c.ciudad ?? '—'}\n` +
     `• Producto: ${c.producto ?? '—'}\n` +
+    `• Categoría: ${c.categoria ?? '—'}\n` +
     `• Cantidad: ${c.cantidad ?? c.cantidadTexto ?? '—'}\n` +
+    `• Marca/presentación: ${c.marca ?? '—'}\n` +
     `• Urgencia: ${c.urgencia ?? '—'}\n` +
+    `• Tiempo de entrega: ${c.tiempoEntrega ?? '—'}\n` +
+    `• Dirección de entrega: ${c.direccionEntrega ?? 'la de la empresa'}\n` +
     `• Contacto: ${c.contacto ?? '—'}\n\n` +
     'Responde *sí* para registrar o *no* para corregir.\n' +
     '_Disponibilidad y precio siempre sujetos a confirmación._'
@@ -436,11 +491,16 @@ async function finalizarSolicitud(wa_id, contexto, cliente_id) {
     urgencia: contexto.urgencia ?? 'normal',
     requiere_humano: escala,
     notas,
+    direccion_entrega: contexto.direccionEntrega ?? null,
+    tiempo_entrega: contexto.tiempoEntrega ?? null,
+    nivel_urgencia: contexto.urgenciaTexto ?? null,
     items: [
       {
         descripcion_libre: contexto.producto,
         cantidad: contexto.cantidad,
         unidad: null,
+        categoria: contexto.categoria ?? null,
+        presentacion: contexto.marca ?? null,
         nota: contexto.contacto ? `Contacto: ${contexto.contacto}` : null,
       },
     ],
