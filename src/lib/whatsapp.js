@@ -63,21 +63,24 @@ export function parseInbound(body) {
         // Normalizamos el texto según el tipo de mensaje.
         // Para botones/listas interactivas extraemos el título seleccionado.
         let texto = '';
+        let replyId = null;
         if (tipo === 'text') {
           texto = m.text?.body ?? '';
         } else if (tipo === 'interactive') {
-          texto =
-            m.interactive?.button_reply?.title ??
-            m.interactive?.list_reply?.title ??
-            m.interactive?.button_reply?.id ??
-            '';
+          const boton = m.interactive?.button_reply;
+          const lista = m.interactive?.list_reply;
+          texto = boton?.title ?? lista?.title ?? boton?.id ?? lista?.id ?? '';
+          replyId = boton?.id ?? lista?.id ?? null;
         } else if (tipo === 'button') {
           texto = m.button?.text ?? '';
+          replyId = m.button?.payload ?? null;
         }
 
         resultado.push({
           wa_id,
           texto: (texto || '').trim(),
+          // Id del botón/opción pulsada: más confiable que el título visible.
+          replyId,
           messageId: m.id,
           nombrePerfil: nombrePorWaId[wa_id] ?? '',
           tipo,
@@ -133,6 +136,65 @@ export async function sendText(to, body) {
   } catch (err) {
     logger.error(`sendText excepción hacia ${to}:`, err?.message ?? err);
     return { ok: false, status: 0, data: { error: String(err?.message ?? err) } };
+  }
+}
+
+/**
+ * Envía un mensaje con botones de respuesta rápida (máximo 3, límite de Meta).
+ * Se usa para las preguntas de sí/no como "¿requieres factura?" (minuta 1):
+ * es más rápido y menos ambiguo que pedir que escriban.
+ *
+ * Si el envío falla (por ejemplo si el número no soporta interactivos),
+ * cae automáticamente a texto plano para no romper la conversación.
+ *
+ * @param {string} to
+ * @param {string} cuerpo - texto de la pregunta
+ * @param {Array<{id: string, titulo: string}>} botones - máx 3, título de 20 caracteres
+ * @returns {Promise<{ok: boolean, status: number, data: any}>}
+ */
+export async function sendButtons(to, cuerpo, botones) {
+  const lista = (botones ?? []).slice(0, 3).map((b) => ({
+    type: 'reply',
+    reply: { id: b.id, title: b.titulo.slice(0, 20) },
+  }));
+
+  if (lista.length === 0) return sendText(to, cuerpo);
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      // El cuerpo de un interactivo admite 1024 caracteres.
+      body: { text: cuerpo.slice(0, 1024) },
+      action: { buttons: lista },
+    },
+  };
+
+  try {
+    const resp = await fetch(urlMensajes(), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.WHATSAPP_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+
+    if (!resp.ok) {
+      logger.warn(
+        `sendButtons falló (${resp.status}) hacia ${to}; se reintenta como texto.`
+      );
+      return sendText(to, cuerpo);
+    }
+    return { ok: true, status: resp.status, data };
+  } catch (err) {
+    logger.warn(`sendButtons excepción hacia ${to}; se reintenta como texto:`, err?.message ?? err);
+    return sendText(to, cuerpo);
   }
 }
 

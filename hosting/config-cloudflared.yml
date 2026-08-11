@@ -1,0 +1,37 @@
+# Configuración del túnel de Cloudflare para el bot ALFA-DEO.
+#
+# ANTES DE USARLO, cambia las tres cosas marcadas con <<< >>>:
+#   1. El ID del túnel (lo imprime `cloudflared tunnel create alfadeo-bot`)
+#   2. La ruta al archivo de credenciales
+#   3. Tu subdominio real
+#
+# Dónde va este archivo en Windows:
+#   C:\Users\<TU-USUARIO>\.cloudflared\config.yml
+#
+# `cloudflared service install` lo copia solo al perfil del servicio, así que
+# guárdalo ahí ANTES de instalar el servicio. Si lo editas después, hay que
+# reinstalar el servicio o reiniciarlo.
+
+# ID del túnel (NO el nombre). Sale de: cloudflared tunnel list
+tunnel: <<<ID-DEL-TUNEL>>>
+
+# Archivo .json que generó `cloudflared tunnel create`.
+credentials-file: C:\Users\<<<TU-USUARIO>>>\.cloudflared\<<<ID-DEL-TUNEL>>>.json
+
+# Cuánto espera al arrancar antes de darse por vencido con el servicio local.
+# La PC puede tardar en levantar el bot después de un reinicio de Windows.
+retries: 10
+
+ingress:
+  # El webhook del bot. Cloudflare recibe HTTPS y lo entrega en HTTP local:
+  # el tráfico nunca sale sin cifrar de la red, y no se abre ningún puerto.
+  - hostname: <<<bot.tudominio.com>>>
+    service: http://localhost:3000
+    originRequest:
+      # Meta reintenta si tardas; 30 s es de sobra porque el webhook
+      # responde 200 de inmediato y procesa aparte.
+      connectTimeout: 30s
+      noHappyEyeballs: true
+
+  # Regla obligatoria de cierre: todo lo demás se rechaza.
+  - service: http_status:404

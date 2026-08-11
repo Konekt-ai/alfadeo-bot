@@ -1,11 +1,20 @@
 # ALFA-DEO — Bot de WhatsApp (webhook)
 
 Webhook de bot de WhatsApp para **ALFA-DEO**, distribuidora farmacéutica B2B.
-Recibe solicitudes de abastecimiento por WhatsApp, las califica, las guarda en
-**Supabase (PostgreSQL)** y notifica al equipo interno.
+Atiende consultas de producto, consulta el inventario real, registra solicitudes
+en **Supabase** y las rutea al asesor de la plaza que corresponde.
 
-> **Regla de oro:** el bot **nunca** promete precio, existencia ni tiempo de
-> entrega. Todo queda **"sujeto a confirmación"** de un asesor.
+> **Qué contesta el bot solo y qué no**
+>
+> | Pregunta | Respuesta |
+> | --- | --- |
+> | ¿Tienen el medicamento? | **Sí**, consulta inventario real y dice en qué plaza hay (sin revelar piezas) |
+> | ¿Cuánto cuesta? | **No**, siempre lo confirma un asesor |
+> | ¿Cuándo lo entregan? | **Sí**, calcula la fecha con el calendario de paquetería |
+> | ¿Requiere factura? | **Sí**, la pregunta al final y captura los datos fiscales |
+>
+> Estos interruptores se controlan con `BOT_DA_EXISTENCIA`, `BOT_DA_CANTIDADES`
+> y `BOT_DA_PRECIOS`.
 
 ## Stack
 
@@ -17,56 +26,80 @@ Recibe solicitudes de abastecimiento por WhatsApp, las califica, las guarda en
 
 No se usan librerías no oficiales (Baileys, whatsapp-web.js, etc.).
 
+## ⚠️ Requisito previo: correr la migración
+
+El bot **no funciona** sin la migración del catálogo. Se corre **una sola vez**
+desde Supabase → SQL Editor:
+
+```text
+alfadeo-panel/supabase/reunion-catalogo-sucursales.sql
+```
+
+Agrega el desglose del catálogo (comercial / genérico / miligramos /
+presentación), la tabla `sucursales` (Guadalajara y Monterrey), la existencia por
+plaza y los campos de facturación. Es aditiva e idempotente.
+
+Después, verifica que quedó bien:
+
+```bash
+npm run verificar-catalogo
+```
+
 ## Estructura
 
-```
+```text
 alfadeo-bot/
 ├─ src/
-│  ├─ server.js                 # Express, monta rutas, escucha PORT
-│  ├─ config/env.js             # lee y valida variables de entorno
-│  ├─ lib/supabase.js           # cliente Supabase + registrarMensaje()
-│  ├─ lib/whatsapp.js           # sendText(), verifyWebhook(), parseInbound()
-│  ├─ flows/abastecimiento.js   # máquina de estados de la solicitud
-│  ├─ flows/faq.js              # respuestas de información (texto fijo)
-│  ├─ services/solicitudes.js   # upsert cliente, crear solicitud + items
-│  ├─ services/escalamiento.js  # reglas de escalamiento + notificarEquipo()
-│  └─ utils/logger.js
-├─ supabase/schema.sql          # esquema de REFERENCIA (no se ejecuta)
+│  ├─ server.js                  # Express, monta rutas, escucha PORT
+│  ├─ config/env.js              # lee y valida variables de entorno
+│  ├─ lib/supabase.js            # cliente Supabase + registrarMensaje()
+│  ├─ lib/whatsapp.js            # sendText(), sendButtons(), parseInbound()
+│  ├─ lib/fechas.js              # calendario hábil y fecha de entrega
+│  ├─ flows/abastecimiento.js    # máquina de estados de la conversación
+│  ├─ flows/intenciones.js       # entiende texto libre ("tienes ondansetron?")
+│  ├─ flows/faq.js               # todos los textos del bot
+│  ├─ services/catalogo.js       # búsqueda de productos y disponibilidad
+│  ├─ services/entrega.js        # mensajes de tiempo de entrega
+│  ├─ services/facturacion.js    # captura y validación de datos fiscales
+│  ├─ services/ruteo.js          # a qué asesor va cada solicitud
+│  ├─ services/solicitudes.js    # upsert cliente, crear solicitud + items
+│  ├─ services/escalamiento.js   # reglas de "esto lo atiende una persona"
+│  └─ utils/{logger,texto}.js
+├─ pruebas/logica.test.mjs       # suite de pruebas (npm test)
+├─ scripts/
+│  ├─ verificar-catalogo.mjs     # revisa la migración contra la BD
+│  └─ simular-conversacion.mjs   # conversación completa sin mandar WhatsApps
+├─ hosting/                      # para correrlo en la PC de la empresa
+│  ├─ README.md                  # guía de instalación paso a paso
+│  ├─ instalar.ps1               # arranque automático + servicio
+│  ├─ supervisor.ps1             # mantiene el bot vivo y rota logs
+│  ├─ estado.ps1                 # diagnóstico
+│  ├─ desinstalar.ps1
+│  └─ config-cloudflared.yml     # plantilla del túnel
+├─ web/boton-whatsapp.html       # botón flotante para la página web
+├─ supabase/schema.sql           # esquema de REFERENCIA (no se ejecuta)
 ├─ .env.example
-├─ package.json
-├─ railway.json                 # config de despliegue (también hay Procfile)
-└─ README.md
+└─ railway.json                  # despliegue (también hay Procfile)
 ```
 
 ## Instalar y correr en local
 
-1. Clona el repo y entra a la carpeta.
-2. Copia el archivo de variables y complétalo:
-   ```bash
-   cp .env.example .env
-   ```
-3. Instala dependencias y arranca:
-   ```bash
-   npm install
-   npm start
-   ```
-4. Verifica que responde:
-   ```bash
-   curl http://localhost:3000/health
-   # -> {"ok":true}
-   ```
+```bash
+cp .env.example .env      # PowerShell: Copy-Item .env.example .env
+npm install
+npm test                  # 35 pruebas, no tocan la BD ni la API de Meta
+npm start
+curl http://localhost:3000/health   # -> {"ok":true}
+```
 
-> En Windows PowerShell usa `Copy-Item .env.example .env` y
-> `Invoke-RestMethod http://localhost:3000/health`.
-
-### Probar la verificación del webhook (local)
+### Probar la verificación del webhook
 
 ```bash
 curl "http://localhost:3000/webhook?hub.mode=subscribe&hub.verify_token=TU_VERIFY_TOKEN&hub.challenge=12345"
 # -> 12345
 ```
 
-### Probar un mensaje entrante simulado (local)
+### Simular un mensaje entrante
 
 ```bash
 curl -X POST http://localhost:3000/webhook \
@@ -77,81 +110,158 @@ curl -X POST http://localhost:3000/webhook \
       "changes": [{
         "value": {
           "contacts": [{ "wa_id": "5213312345678", "profile": { "name": "Prueba" } }],
-          "messages": [{ "from": "5213312345678", "id": "wamid.TEST", "type": "text", "text": { "body": "1" } }]
+          "messages": [{ "from": "5213312345678", "id": "wamid.TEST", "type": "text",
+                         "text": { "body": "buenas tardes, tienen ondansetron 8mg?" } }]
         }
       }]
     }]
   }'
 ```
 
-El servidor responde `200` de inmediato y procesa el mensaje en segundo plano
-(intentará enviar la respuesta por WhatsApp y registrar en `mensajes`).
+Responde `200` de inmediato y procesa en segundo plano.
 
 ## Variables de entorno
 
-| Variable                    | Descripción                                                                 |
-| --------------------------- | --------------------------------------------------------------------------- |
-| `WHATSAPP_TOKEN`            | Token de acceso de la app de Meta (preferible token permanente de System User). |
-| `WHATSAPP_PHONE_NUMBER_ID`  | **Phone Number ID** del número (no el número visible). Lo da Meta.           |
-| `WHATSAPP_VERIFY_TOKEN`     | Cadena que tú inventas; debe coincidir con la que registras en Meta.        |
-| `SUPABASE_URL`              | URL del proyecto Supabase.                                                   |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Service Role Key** (no la anon key). Sólo en el servidor.                  |
-| `INTERNAL_NOTIFY_NUMBERS`   | Números del equipo separados por coma, formato `5213312345678`.             |
-| `ESCALA_CANTIDAD_UMBRAL`    | Cantidad a partir de la cual se escala a humano (default `500`).            |
-| `PORT`                      | Puerto local (Railway lo inyecta automáticamente; default `3000`).          |
-| `GRAPH_API_VERSION`         | (Opcional) versión de Graph API. Default `v21.0`.                            |
+| Variable | Descripción |
+| --- | --- |
+| `WHATSAPP_TOKEN` | Token de la app de Meta (preferible permanente de System User). |
+| `WHATSAPP_PHONE_NUMBER_ID` | **Phone Number ID** del número (no el número visible). |
+| `WHATSAPP_VERIFY_TOKEN` | Cadena que tú inventas; debe coincidir con la de Meta. |
+| `SUPABASE_URL` | URL del proyecto Supabase. |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Service Role Key** (no la anon key). Sólo en el servidor. |
+| `INTERNAL_NOTIFY_NUMBERS` | Respaldo: reciben todas las solicitudes. Separados por coma. |
+| `RUTEO_ASESORES` | Asesor por plaza: `GDL:5213312345678,MTY:5218112345678`. |
+| `SUCURSAL_DEFAULT` | Plaza cuando no hay pistas. Default `GDL`. |
+| `BOT_DA_EXISTENCIA` | Si el bot dice sí/no de existencia. Default `true`. |
+| `BOT_DA_CANTIDADES` | Si revela piezas exactas. Default `false` **(déjalo apagado)**. |
+| `BOT_DA_PRECIOS` | Si da precio automático. Default `false` **(déjalo apagado)**. |
+| `PAQUETERIA` | Nombre de la paquetería en los mensajes. Default `DHL`. |
+| `ENTREGA_HORA_CORTE` | Hora (0-23) tras la cual el pedido sale al día siguiente. Default `15`. |
+| `ENTREGA_DIAS_PROVEEDOR` | Días hábiles extra si hay que pedirlo a proveedor. Default `2`. |
+| `ZONA_HORARIA` | Default `America/Mexico_City`. |
+| `ESCALA_CANTIDAD_UMBRAL` | Piezas a partir de las cuales lo atiende una persona. Default `500`. |
+| `PORT` | Puerto local (Railway lo inyecta solo). Default `3000`. |
+| `GRAPH_API_VERSION` | Versión de Graph API. Default `v21.0`. |
 
-## Desplegar en Railway
+## Cómo conversa el bot
 
-1. Sube este repo a GitHub.
-2. En [Railway](https://railway.app): **New Project → Deploy from GitHub repo** y
-   selecciona el repositorio.
-3. Railway detecta Node automáticamente y usa el `startCommand` de `railway.json`
-   (`node src/server.js`).
-4. En la pestaña **Variables**, agrega todas las del cuadro de arriba
-   (excepto `PORT`, que Railway inyecta solo).
-5. Genera un dominio público en **Settings → Networking → Generate Domain**.
-   Obtendrás algo como `https://<tu-app>.up.railway.app`.
-6. Verifica salud: `https://<tu-app>.up.railway.app/health`.
+El menú es **opcional**: el cliente puede escribir directo `"buenas tardes,
+tienen ondansetron 8mg?"` y el bot lo entiende. El flujo sigue el orden real de
+compra que se documentó en la reunión:
+
+```text
+1. producto  ->  ¿tienen existencia?   consulta inventario, dice la plaza
+2. cantidad  ->  ¿cuánto cuesta?       "lo confirma un asesor"
+                 ¿cuándo entregan?     fecha calculada con el calendario
+3. datos     ->  nombre, empresa, ciudad (sólo si es cliente nuevo)
+4. factura   ->  ¿requiere factura? -> razón social, RFC, CP, correo
+5. confirmar ->  folio + fecha estimada + aviso al asesor de la plaza
+```
+
+Detalles que importan:
+
+- **Preguntas frecuentes en cualquier momento.** Si a mitad de la captura
+  preguntan "¿y cuándo llega?", el bot responde y retoma donde iba.
+- **Clientes nuevos** reciben los tiempos de entrega en el primer mensaje, sin
+  pedirlos.
+- **Clientes conocidos** no vuelven a dar sus datos ni sus datos fiscales.
+- **Varias coincidencias** (mismo genérico, distinta marca o presentación) se
+  listan numeradas con ✅ en existencia / ⏳ se pide a proveedor.
+- **Ventana de 24 h**: dentro de la ventana se responde con texto libre. Fuera se
+  requieren **plantillas aprobadas** (pendiente).
+
+### Reglas de tiempo de entrega
+
+- Confirmado antes de `ENTREGA_HORA_CORTE` → sale el mismo día.
+- Entrega normalmente al día siguiente hábil.
+- **Si sale viernes, llega el martes** (la paquetería no entrega en fin de semana).
+- Se saltan sábados, domingos y los festivos oficiales de la LFT.
+
+### Cuándo lo atiende una persona
+
+`requiere_humano = true` y aviso marcado al asesor si:
+
+- Pedido urgente, o cliente de tipo `gobierno` / `hospital`.
+- Volumen ≥ `ESCALA_CANTIDAD_UMBRAL`.
+- Producto marcado como `controlado`.
+- Licitación, concurso, queja, devolución o producto en mal estado.
+- El producto no se encontró en el catálogo tras dos intentos.
+- El cliente pide hablar con alguien.
+
+### Ruteo al asesor
+
+1. Si sólo una plaza tiene existencia, esa atiende.
+2. Si hay en varias, gana la plaza de la ciudad del cliente.
+3. Sin existencia propia, manda la ciudad de entrega.
+4. Sin pistas, cae en `SUCURSAL_DEFAULT`.
+
+Los números de `INTERNAL_NOTIFY_NUMBERS` reciben **todo** como respaldo.
+
+## Botón de WhatsApp para la página web
+
+`web/boton-whatsapp.html` es un bloque autocontenido (HTML + CSS + JS, sin
+dependencias). Cambia los números en `data-numero` y pégalo antes de `</body>`.
+Si configuras dos plazas, muestra un selector antes de abrir el chat.
+
+## Pruebas
+
+```bash
+npm test                   # lógica pura: fechas, intenciones, fiscal, ruteo
+npm run verificar-catalogo # revisa la migración contra la BD real
+npm run simular            # conversación completa, sin mandar WhatsApps
+```
+
+### El simulador
+
+`npm run simular <escenario>` corre una conversación entera contra la base real
+y te imprime el diálogo tal cual lo vería el cliente. **No manda ni un mensaje a
+WhatsApp**: intercepta las llamadas a la Graph API, vacía los números de aviso y
+borra al final todo lo que escribió (conversación, mensajes, cliente y
+solicitud). Lo único que no revierte es el consumo de un folio, porque la
+secuencia de identidad no retrocede.
+
+| Escenario | Qué prueba |
+| --- | --- |
+| `completo` | Camino feliz: producto → cantidad → datos → factura → folio |
+| `desvios` | El cliente pregunta precio y entrega a mitad de la captura |
+| `nohay` | Producto que no existe: dos intentos y pasa a una persona |
+| `fiscalPegado` | El cliente pega toda su constancia fiscal en un mensaje |
+| `licitacion` | Nunca lo contesta el bot |
+
+Úsalo antes de publicar cualquier cambio de textos o de flujo.
+
+## Desplegar
+
+### En la computadora de la empresa (Windows)
+
+Guía completa paso a paso: **[hosting/README.md](hosting/README.md)**
+
+Resumen: `hosting\instalar.ps1` deja el bot arrancando solo al encender la PC y
+reviviéndose si se cae; Cloudflare Tunnel le da URL pública con HTTPS sin abrir
+ningún puerto del router. `hosting\estado.ps1` diagnostica todo de un vistazo.
+
+### En Railway
+
+1. Sube el repo a GitHub.
+2. Railway: **New Project → Deploy from GitHub repo**.
+3. Usa el `startCommand` de `railway.json` (`node src/server.js`).
+4. En **Variables**, agrega todas las del cuadro (excepto `PORT`).
+5. **Settings → Networking → Generate Domain**.
+6. Verifica: `https://<tu-app>.up.railway.app/health`.
 
 ## Registrar el webhook en Meta
 
-1. En [Meta for Developers](https://developers.facebook.com) abre tu app de
-   **WhatsApp**.
-2. Ve a **WhatsApp → Configuración → Webhook** (Configuration).
+1. [Meta for Developers](https://developers.facebook.com) → tu app de WhatsApp.
+2. **WhatsApp → Configuración → Webhook**.
 3. **Callback URL:** `https://<tu-app>.up.railway.app/webhook`
-4. **Verify token:** el mismo valor que pusiste en `WHATSAPP_VERIFY_TOKEN`.
-5. Pulsa **Verify and save**. Meta hará un `GET /webhook`; si el token coincide,
-   el servidor devuelve el `hub.challenge` y queda verificado.
-6. En **Webhook fields**, suscríbete al campo **`messages`**.
-7. Asegúrate de que tu número de prueba o producción esté agregado y de que el
-   `WHATSAPP_TOKEN` tenga permisos `whatsapp_business_messaging`.
+4. **Verify token:** el mismo de `WHATSAPP_VERIFY_TOKEN`.
+5. **Verify and save**, y suscríbete al campo **`messages`**.
+6. El `WHATSAPP_TOKEN` necesita permiso `whatsapp_business_messaging`.
 
-## Comportamiento del bot
+## Pendientes conocidos
 
-Flujo (máquina de estados en `conversaciones`):
-
-```
-inicio → menu → cap_nombre → cap_empresa → cap_tipo → cap_ciudad →
-cap_producto → cap_cantidad → cap_urgencia → cap_contacto → confirmar → fin
-```
-
-- **Menú**: 1) Solicitar abastecimiento · 2) Información · 3) Hablar con una persona.
-- Al **confirmar** una solicitud: `upsert` en `clientes` (por `telefono_wa`),
-  alta en `solicitudes` (`canal='whatsapp'`, `estado='nueva'`) y filas en
-  `solicitud_items`. Se responde con el **folio** y la leyenda *sujeto a confirmación*.
-- **Escala a humano** (`requiere_humano=true` + notifica al equipo) si:
-  urgencia `urgente`; tipo `gobierno`/`hospital`; cantidad ≥ `ESCALA_CANTIDAD_UMBRAL`;
-  producto `controlado`; datos incompletos; o el usuario pide precio exacto,
-  menciona licitación o se queja.
-- **Ventana de 24h**: dentro de la ventana se responde con texto libre. Para
-  reabrir fuera de las 24h se requieren **plantillas aprobadas**
-  (`// TODO: plantillas`, no implementado aún).
-- Cada mensaje entrante y saliente se registra en `mensajes`.
-
-## Notas
-
-- La base de datos **ya existe** en Supabase; el bot sólo la consume. El archivo
-  `supabase/schema.sql` es referencia y no se ejecuta.
-- Pendientes marcados como `// TODO: plantillas` / `// TODO: plantilla de
-  notificación` para mensajería fuera de la ventana de 24h.
+- **Plantillas fuera de la ventana de 24 h**: los avisos al asesor pueden fallar
+  si no ha habido conversación reciente. Hoy se registran en `mensajes` como
+  respaldo; falta dar de alta plantillas aprobadas en Meta.
+- El bot no factura ni descuenta inventario todavía: registra la solicitud y la
+  factura la emite el panel.

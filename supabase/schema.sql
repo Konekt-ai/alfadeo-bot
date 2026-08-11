@@ -2,78 +2,112 @@
 -- ESQUEMA DE REFERENCIA — ALFA-DEO bot de WhatsApp
 -- =====================================================================
 -- IMPORTANTE: el esquema REAL se administra directamente en Supabase.
--- Este archivo es SÓLO una referencia para el desarrollo del bot; el bot
--- NO crea ni migra tablas. No ejecutes este archivo contra producción
--- a menos que sepas exactamente lo que haces.
+-- Este archivo es SÓLO documentación de lo que el bot consume; el bot
+-- NO crea ni migra tablas.
 --
--- Se incluye como documentación de las tablas y enums que el bot consume.
+-- La migración que agrega el catálogo farmacéutico, las sucursales y los
+-- campos de facturación vive en el repo del panel:
+--
+--     alfadeo-panel/supabase/reunion-catalogo-sucursales.sql
+--
+-- Se ejecuta una sola vez desde Supabase → SQL Editor. Sin ella, el bot
+-- no puede buscar productos ni decir en qué plaza hay existencia.
 -- =====================================================================
 
 -- ----------------------- ENUMS (referencia) --------------------------
 -- tipo de cliente:      hospital | clinica | farmacia | gobierno | distribuidor | medico | otro
--- canal de solicitud:   incluye 'whatsapp' (entre otros)
+-- canal de solicitud:   incluye 'whatsapp'
 -- estado de solicitud:  nueva | en_revision | cotizada | enviada | aceptada | rechazada | facturada | cancelada
 -- urgencia:             normal | urgente | programada
 -- direccion de mensaje: in | out
 
 -- ----------------------- TABLAS (referencia) -------------------------
 
--- productos: catálogo. precio_base es interno y NUNCA se expone al cliente.
--- CREATE TABLE productos (
+-- sucursales: las dos empresas del grupo (minuta 9). GDL es matriz.
+-- CREATE TABLE sucursales (
 --   id            uuid PRIMARY KEY,
---   clave         text,
+--   clave         text UNIQUE,   -- 'GDL' | 'MTY'
 --   nombre        text,
---   descripcion   text,
---   laboratorio   text,
---   presentacion  text,
---   unidad        text,
---   categoria     text,
---   precio_base   numeric,      -- interno, no exponer
---   iva_exento    boolean,
---   controlado    boolean,      -- si true => escalar a humano
+--   razon_social  text,
+--   rfc           text,
+--   ciudad        text,
+--   estado        text,
+--   telefono_wa   text,
+--   asesor_nombre text,
+--   es_matriz     boolean,
 --   activo        boolean
 -- );
 
--- inventario: existencia REFERENCIAL, sujeta a confirmación.
+-- productos: catálogo. precio_base es interno y NUNCA se expone al cliente.
+-- Las 5 columnas de abajo del bloque las llena el trigger
+-- `productos_derivar_nombre` parseando `nombre` (minuta 17).
+-- CREATE TABLE productos (
+--   id                 uuid PRIMARY KEY,
+--   clave              text,
+--   nombre             text,       -- "VYLKOR - ONDANSETRON TAB 8 mg C/10"
+--   nombre_comercial   text,       -- "VYLKOR"        <- minuta 17
+--   nombre_generico    text,       -- "ONDANSETRON"   <- minuta 17
+--   concentracion      text,       -- "8 mg"          <- minuta 17
+--   forma_farmaceutica text,       -- "TAB"
+--   presentacion       text,       -- "C/10"          <- minuta 17, 18
+--   codigo_barras      text,       -- de Aspel, para el POS (minuta 22)
+--   descripcion        text,
+--   laboratorio        text,
+--   unidad             text,
+--   categoria          text,
+--   precio_base        numeric,    -- interno, no exponer
+--   tasa_iva           numeric,    -- 0 para medicamento, 0.16 otros (minuta 3)
+--   iva_exento         boolean,
+--   controlado         boolean,    -- si true => escalar a humano
+--   lote               text,       -- minuta 23
+--   caducidad          date,
+--   activo             boolean
+-- );
+
+-- inventario: existencia por plaza (minuta 28).
+-- OJO: `ubicacion` es el RACK/LOCKER dentro de la bodega, NO la plaza.
 -- CREATE TABLE inventario (
 --   id            uuid PRIMARY KEY,
 --   producto_id   uuid REFERENCES productos(id),
---   ubicacion_id  uuid REFERENCES ubicaciones(id),
+--   sucursal_id   uuid REFERENCES sucursales(id),   -- <- minuta 28
+--   ubicacion     text,                             -- 'RACK N1', 'REFRIGERADO'...
 --   existencia    numeric
--- );
-
--- ubicaciones:
--- CREATE TABLE ubicaciones (
---   id        uuid PRIMARY KEY,
---   nombre    text,
---   direccion text,
---   ciudad    text,
---   estado    text
 -- );
 
 -- clientes: upsert por telefono_wa.
 -- CREATE TABLE clientes (
---   id          uuid PRIMARY KEY,
---   nombre      text,
---   empresa     text,
---   tipo        text,           -- enum tipo cliente
---   ciudad      text,
---   telefono_wa text UNIQUE,    -- clave de upsert del bot
---   correo      text
+--   id                 uuid PRIMARY KEY,
+--   nombre             text,
+--   empresa            text,
+--   tipo               text,        -- enum tipo cliente
+--   ciudad             text,
+--   telefono_wa        text UNIQUE, -- clave de upsert del bot
+--   correo             text,
+--   rfc                text,
+--   razon_social       text,        -- \
+--   regimen_fiscal     text,        --  | datos fiscales, para no volver
+--   uso_cfdi           text,        --  | a pedírselos (minuta 1)
+--   cp_fiscal          text,        --  |
+--   correo_facturacion text,        -- /
+--   requiere_factura   boolean,
+--   sucursal_id        uuid REFERENCES sucursales(id)
 -- );
 
 -- solicitudes:
 -- CREATE TABLE solicitudes (
---   id              uuid PRIMARY KEY,
---   folio           text,
---   cliente_id      uuid REFERENCES clientes(id),
---   canal           text,       -- 'whatsapp'
---   estado          text,       -- 'nueva' al crearse
---   urgencia        text,       -- enum urgencia
---   ciudad_entrega  text,
---   responsable     text,
---   requiere_humano boolean,
---   notas           text
+--   id               uuid PRIMARY KEY,
+--   folio            int GENERATED ALWAYS AS IDENTITY,  -- lo asigna la BD
+--   cliente_id       uuid REFERENCES clientes(id),
+--   canal            text,       -- 'whatsapp'
+--   estado           text,       -- 'nueva' al crearse
+--   urgencia         text,
+--   ciudad_entrega   text,
+--   responsable      text,
+--   requiere_humano  boolean,
+--   requiere_factura boolean,    -- <- minuta 1
+--   datos_fiscales   jsonb,      -- <- minuta 1
+--   sucursal_id      uuid REFERENCES sucursales(id),   -- <- minuta 15
+--   notas            text
 -- );
 
 -- solicitud_items:
@@ -84,6 +118,9 @@
 --   descripcion_libre text,
 --   cantidad          numeric,
 --   unidad            text,
+--   categoria         text,
+--   marca             text,
+--   presentacion      text,
 --   nota              text
 -- );
 
@@ -107,3 +144,12 @@
 --   payload    jsonb,
 --   created_at timestamptz DEFAULT now()
 -- );
+
+-- ----------------------- FUNCIONES QUE USA EL BOT --------------------
+-- buscar_productos(q text, limite int)
+--   Búsqueda por nombre priorizando el COMERCIAL (minuta 19, 20).
+--   Devuelve, por producto, un jsonb `disponibilidad` con la existencia
+--   por sucursal (minuta 28).
+--
+-- parse_producto_nombre(nombre text) -> jsonb
+--   Parte "VYLKOR - ONDANSETRON TAB 8 mg C/10" en sus 5 componentes.

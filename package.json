@@ -6,7 +6,10 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "node --test \"pruebas/*.test.mjs\"",
+    "verificar-catalogo": "node scripts/verificar-catalogo.mjs",
+    "simular": "node scripts/simular-conversacion.mjs"
   },
   "engines": {
     "node": ">=20 <21"

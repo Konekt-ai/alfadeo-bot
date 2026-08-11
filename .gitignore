@@ -5,3 +5,9 @@ node_modules/
 npm-debug.log*
 .DS_Store
 dist/
+
+# Logs del supervisor en la PC de la empresa
+logs/
+
+# URL pública del túnel: es específica de cada instalación
+hosting/url-publica.txt

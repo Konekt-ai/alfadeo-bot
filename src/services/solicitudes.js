@@ -46,6 +46,29 @@ export function normalizarUrgencia(texto) {
 }
 
 /**
+ * Busca un cliente por su número de WhatsApp.
+ * Sirve para saber si es cliente nuevo (minuta 6: a los nuevos hay que
+ * comunicarles los tiempos de entrega desde el inicio) y para no volver a
+ * pedirle datos que ya nos dio.
+ *
+ * @param {string} telefono_wa
+ * @returns {Promise<object|null>}
+ */
+export async function obtenerCliente(telefono_wa) {
+  const { data, error } = await supabase
+    .from('clientes')
+    .select('*')
+    .eq('telefono_wa', telefono_wa)
+    .maybeSingle();
+
+  if (error) {
+    logger.warn('obtenerCliente falló:', error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
  * Upsert de cliente por telefono_wa. Si ya existe, actualiza datos no vacíos.
  * @param {object} datos
  * @param {string} datos.telefono_wa
@@ -74,6 +97,15 @@ export async function upsertCliente(datos) {
     rfc: datos.rfc ?? null,
     telefono: datos.telefono ?? null,
     especificacion: datos.especificacion ?? null,
+    // Datos fiscales (minuta 1): se guardan en el cliente para no volver a
+    // pedírselos en el siguiente pedido.
+    razon_social: datos.razon_social ?? null,
+    regimen_fiscal: datos.regimen_fiscal ?? null,
+    uso_cfdi: datos.uso_cfdi ?? null,
+    cp_fiscal: datos.cp_fiscal ?? null,
+    correo_facturacion: datos.correo_facturacion ?? null,
+    requiere_factura: datos.requiere_factura ?? null,
+    sucursal_id: datos.sucursal_id ?? null,
   };
 
   // Quitamos llaves nulas para no pisar datos previos con null en un upsert.
@@ -126,6 +158,11 @@ export async function crearSolicitudConItems(params) {
       tiempo_entrega: params.tiempo_entrega ?? null,
       vigencia_cotizacion: params.vigencia_cotizacion ?? null,
       nivel_urgencia: params.nivel_urgencia ?? null,
+      // Minuta 1: se pregunta al final del flujo y se guarda con la solicitud.
+      requiere_factura: params.requiere_factura ?? null,
+      datos_fiscales: params.datos_fiscales ?? null,
+      // Minuta 15 y 28: plaza que atiende la solicitud.
+      sucursal_id: params.sucursal_id ?? null,
     })
     .select()
     .single();

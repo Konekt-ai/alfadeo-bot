@@ -1,0 +1,158 @@
+<!--
+  ALFA-DEO · Botón flotante de WhatsApp para la página web (minuta 12).
+
+  Cómo usarlo:
+    1. Cambia los números en data-numero por los reales (formato internacional
+       SIN el +, ej. 5213312345678).
+    2. Pega este bloque completo justo antes de </body> en la página.
+    3. Listo. No necesita librerías ni build.
+
+  Notas:
+    · Si sólo se configura un número, el botón abre WhatsApp directo.
+      Si hay dos o más, primero muestra el selector de plaza (minuta 15).
+    · El texto pre-llenado hace que el cliente llegue al bot ya con el
+      contexto, y de paso permite medir de dónde vino la conversación.
+    · Los textos son grandes a propósito (minuta 13).
+-->
+
+<div id="alfadeo-wa" class="alfadeo-wa">
+  <div class="alfadeo-wa__panel" id="alfadeo-wa-panel" role="dialog" aria-label="Elige sucursal" hidden>
+    <p class="alfadeo-wa__titulo">¿Con qué sucursal quieres hablar?</p>
+
+    <a class="alfadeo-wa__opcion"
+       data-numero="5213300000000"
+       data-mensaje="Hola, escribo desde la página web. Necesito cotizar:">
+      <strong>Guadalajara</strong>
+      <span>Jalisco · Matriz</span>
+    </a>
+
+    <a class="alfadeo-wa__opcion"
+       data-numero="5218100000000"
+       data-mensaje="Hola, escribo desde la página web. Necesito cotizar:">
+      <strong>Monterrey</strong>
+      <span>Nuevo León</span>
+    </a>
+  </div>
+
+  <button class="alfadeo-wa__boton" id="alfadeo-wa-boton" aria-label="Escríbenos por WhatsApp">
+    <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true">
+      <path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.96-.94 1.16-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.14-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.61-.92-2.21-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.22 3.08c.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.69.63.71.22 1.36.19 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.17-1.42-.07-.13-.27-.2-.57-.35z"/>
+      <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.46 1.32 4.96L2 22l5.25-1.38c1.45.79 3.08 1.21 4.79 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.85 9.85 0 0 0 12.04 2zm0 18.13h-.01c-1.52 0-3.01-.41-4.31-1.18l-.31-.18-3.2.84.85-3.12-.2-.32a8.22 8.22 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.83 2.42a8.19 8.19 0 0 1 2.41 5.83c0 4.54-3.7 8.24-8.25 8.24z"/>
+    </svg>
+    <span class="alfadeo-wa__etiqueta">Escríbenos</span>
+  </button>
+</div>
+
+<style>
+  .alfadeo-wa {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 9999;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  .alfadeo-wa__boton {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 22px 14px 18px;
+    border: 0;
+    border-radius: 999px;
+    background: #25d366;
+    color: #fff;
+    /* Texto grande a propósito: es la petición explícita de la minuta 13. */
+    font-size: 17px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .22);
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .alfadeo-wa__boton:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, .28);
+  }
+  .alfadeo-wa__boton:focus-visible { outline: 3px solid #0b3; outline-offset: 3px; }
+
+  .alfadeo-wa__panel {
+    position: absolute;
+    right: 0;
+    bottom: 76px;
+    width: 290px;
+    padding: 18px;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, .2);
+  }
+  .alfadeo-wa__panel[hidden] { display: none; }
+
+  .alfadeo-wa__titulo {
+    margin: 0 0 12px;
+    font-size: 16px;
+    font-weight: 700;
+    color: #003366;
+  }
+
+  .alfadeo-wa__opcion {
+    display: block;
+    padding: 13px 15px;
+    margin-bottom: 9px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    text-decoration: none;
+    color: #111827;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .alfadeo-wa__opcion:last-child { margin-bottom: 0; }
+  .alfadeo-wa__opcion:hover { border-color: #25d366; background: #f0fdf4; }
+  .alfadeo-wa__opcion strong { display: block; font-size: 16px; }
+  .alfadeo-wa__opcion span   { font-size: 13px; color: #6b7280; }
+
+  /* En pantallas chicas el botón se queda como icono para no tapar contenido. */
+  @media (max-width: 480px) {
+    .alfadeo-wa__etiqueta { display: none; }
+    .alfadeo-wa__boton { padding: 15px; }
+    .alfadeo-wa__panel { width: calc(100vw - 40px); }
+  }
+</style>
+
+<script>
+  (function () {
+    var contenedor = document.getElementById('alfadeo-wa');
+    var boton = document.getElementById('alfadeo-wa-boton');
+    var panel = document.getElementById('alfadeo-wa-panel');
+    var opciones = panel.querySelectorAll('.alfadeo-wa__opcion');
+
+    function abrirWhatsApp(numero, mensaje) {
+      var url = 'https://wa.me/' + numero +
+                (mensaje ? '?text=' + encodeURIComponent(mensaje) : '');
+      window.open(url, '_blank', 'noopener');
+    }
+
+    // Con una sola sucursal configurada el selector estorba: se va directo.
+    if (opciones.length === 1) {
+      boton.addEventListener('click', function () {
+        abrirWhatsApp(opciones[0].dataset.numero, opciones[0].dataset.mensaje);
+      });
+    } else {
+      boton.addEventListener('click', function () {
+        panel.hidden = !panel.hidden;
+      });
+      opciones.forEach(function (opcion) {
+        opcion.addEventListener('click', function () {
+          abrirWhatsApp(opcion.dataset.numero, opcion.dataset.mensaje);
+          panel.hidden = true;
+        });
+      });
+    }
+
+    // Cerrar al hacer clic fuera o con Escape.
+    document.addEventListener('click', function (e) {
+      if (!contenedor.contains(e.target)) panel.hidden = true;
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') panel.hidden = true;
+    });
+  })();
+</script>
