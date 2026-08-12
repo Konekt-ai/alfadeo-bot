@@ -250,10 +250,44 @@ Checklist antes de darlo por bueno:
 
 ## Operación diaria
 
+En la PC:
+
 ```powershell
 .\hosting\estado.ps1                              # diagnóstico completo
 Get-Content .\logs\bot.log -Tail 50 -Wait         # log en vivo
 Restart-ScheduledTask -TaskName 'ALFA-DEO Bot WhatsApp'   # reiniciar
+```
+
+### Desde tu máquina, por SSH
+
+Con el alias `alfadeo-bot` configurado en tu `~/.ssh/config` (ver más abajo):
+
+```powershell
+ssh alfadeo-bot C:\alfadeo-bot\hosting\actualizar.cmd   # publicar cambios
+ssh alfadeo-bot C:\alfadeo-bot\hosting\estado.cmd       # ver cómo va
+```
+
+Para dejarlo sin contraseña, en tu máquina:
+
+```powershell
+ssh-keygen -t ed25519 -f $env:USERPROFILE\.ssh\id_ed25519_alfadeo -N '""'
+```
+
+y agrega el `.pub` a la PC de la empresa. **Ojo:** si la cuenta es de
+administrador —que es el caso—, la llave **no** va en `~/.ssh/authorized_keys`
+sino en `C:\ProgramData\ssh\administrators_authorized_keys`, y ese archivo sólo
+puede tener permisos para *Administradores* y *SYSTEM*, sin herencia. Si los
+permisos quedan flojos, `sshd` ignora el archivo en silencio y te sigue pidiendo
+contraseña.
+
+Tu `~/.ssh/config`:
+
+```text
+Host alfadeo-bot
+    HostName 192.168.1.116
+    User DELL
+    IdentityFile ~/.ssh/id_ed25519_alfadeo
+    IdentitiesOnly yes
 ```
 
 ### Actualizar el bot
