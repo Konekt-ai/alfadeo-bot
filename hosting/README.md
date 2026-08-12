@@ -269,8 +269,20 @@ bot-actualizar    # traer, probar y reiniciar
 | `bot-log` | Últimas 40 líneas. `bot-log -Seguir` para verlo en vivo |
 
 Son `.cmd` en `C:\alfadeo`, que ya está en el PATH del sistema: los escribes tal
-cual apenas entras por SSH. Los instala `hosting\instalar.ps1`; si hace falta
-rehacerlos, `hosting\instalar-comandos.ps1`.
+cual apenas entras por SSH. Los instala `hosting\instalar.ps1`, y si alguno
+falta `bot-actualizar` los repone solo en el siguiente despliegue.
+
+**La primera vez** —en una máquina que ya tenía el bot pero todavía no los
+comandos— hay que arrancar el huevo y la gallina a mano, una sola vez:
+
+```powershell
+ssh alfadeo-bot
+C:\alfadeo-bot\hosting\actualizar.cmd
+powershell -ExecutionPolicy Bypass -File C:\alfadeo-bot\hosting\instalar-comandos.ps1
+bot-estado
+```
+
+De ahí en adelante basta `bot-actualizar`.
 
 > **Por qué llevan prefijo `bot-`:** en esa misma carpeta viven los comandos del
 > panel (`estado`, `actualizar`, `reiniciar`, `log`). Sin prefijo se pisarían.

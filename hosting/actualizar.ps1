@@ -168,6 +168,24 @@ if ($segundos -lt 0) {
 
 Bien "Responde en http://localhost:$puerto/health (a los ${segundos}s)"
 
+# --- 7. Comandos cortos ------------------------------------------------------
+# Auto-reparación: si falta algún envoltorio —porque es la primera vez, porque
+# alguien los borró, o porque una versión nueva agregó un comando— se rehacen
+# solos. Si ya están todos no se toca nada y esto no cuesta nada.
+$faltantes = @('estado','actualizar','reiniciar','log') |
+             Where-Object { -not (Test-Path (Join-Path 'C:\alfadeo' ('bot-' + $_ + '.cmd'))) }
+
+if ($faltantes.Count -gt 0) {
+  Paso 'Reponiendo los comandos cortos'
+  try {
+    & (Join-Path $PSScriptRoot 'instalar-comandos.ps1') | Out-Null
+    Bien ('Repuestos: ' + (($faltantes | ForEach-Object { 'bot-' + $_ }) -join ', '))
+  } catch {
+    Aviso "No pude reponerlos: $($_.Exception.Message)"
+    Aviso 'Hazlo a mano con: powershell -File C:\alfadeo-bot\hosting\instalar-comandos.ps1'
+  }
+}
+
 Write-Host "`n===============================================" -ForegroundColor White
 Write-Host "  Listo. Bot actualizado y corriendo." -ForegroundColor White
 Write-Host "===============================================`n" -ForegroundColor White
