@@ -250,22 +250,34 @@ Checklist antes de darlo por bueno:
 
 ## Operación diaria
 
-En la PC:
+```text
+# aquí: programas, pruebas con npm run dev, commiteas y empujas
+git push
 
-```powershell
-.\hosting\estado.ps1                              # diagnóstico completo
-Get-Content .\logs\bot.log -Tail 50 -Wait         # log en vivo
-Restart-ScheduledTask -TaskName 'ALFA-DEO Bot WhatsApp'   # reiniciar
+# allá:
+ssh alfadeo-bot
+bot-estado        # ¿está arriba? ¿en qué commit? ¿hay algo nuevo?
+bot-actualizar    # traer, probar y reiniciar
 ```
 
-### Desde tu máquina, por SSH
+| Comando | Qué hace |
+| --- | --- |
+| `bot-estado` | Diagnóstico completo, y te avisa si GitHub tiene commits que no están en la máquina |
+| `bot-actualizar` | `fetch` → `reset --hard` → `npm ci` si cambió el lockfile → pruebas → reiniciar |
+| `bot-actualizar -Forzar` | Reinstala y reinicia aunque no haya nada nuevo |
+| `bot-reiniciar` | Reiniciar sin traer cambios (útil tras editar el `.env`) |
+| `bot-log` | Últimas 40 líneas. `bot-log -Seguir` para verlo en vivo |
 
-Con el alias `alfadeo-bot` configurado en tu `~/.ssh/config` (ver más abajo):
+Son `.cmd` en `C:\alfadeo`, que ya está en el PATH del sistema: los escribes tal
+cual apenas entras por SSH. Los instala `hosting\instalar.ps1`; si hace falta
+rehacerlos, `hosting\instalar-comandos.ps1`.
 
-```powershell
-ssh alfadeo-bot C:\alfadeo-bot\hosting\actualizar.cmd   # publicar cambios
-ssh alfadeo-bot C:\alfadeo-bot\hosting\estado.cmd       # ver cómo va
-```
+> **Por qué llevan prefijo `bot-`:** en esa misma carpeta viven los comandos del
+> panel (`estado`, `actualizar`, `reiniciar`, `log`). Sin prefijo se pisarían.
+> Si prefieres otros nombres: `.\hosting\instalar-comandos.ps1 -Prefijo 'wa-'`.
+
+Los envoltorios sólo llaman a `hosting\*.ps1`, que sí se versionan. Así la
+lógica mejora sola en cada despliegue y los `.cmd` no hay que volver a tocarlos.
 
 Para dejarlo sin contraseña, en tu máquina:
 

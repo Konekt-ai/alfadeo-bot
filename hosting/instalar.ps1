@@ -196,6 +196,15 @@ if ($vivo) {
   Aviso "El bot no respondió todavía. Revisa el log: $RaizBot\logs\bot.log"
 }
 
+# --- 8. Comandos cortos ------------------------------------------------------
+Paso 'Dejando los comandos cortos a la mano'
+try {
+  & (Join-Path $PSScriptRoot 'instalar-comandos.ps1')
+} catch {
+  Aviso "No pude instalar los comandos cortos: $($_.Exception.Message)"
+  Aviso 'Puedes hacerlo después con: .\hosting\instalar-comandos.ps1'
+}
+
 Write-Host "`n===============================================" -ForegroundColor White
 Write-Host "  Listo. Falta el túnel de Cloudflare." -ForegroundColor White
 Write-Host "===============================================" -ForegroundColor White
@@ -203,9 +212,12 @@ Write-Host @"
 
   Siguiente paso:  hosting\README.md  (sección "2. Túnel de Cloudflare")
 
-  Comandos útiles:
-      .\hosting\estado.ps1        ver si está vivo y las últimas líneas del log
+  Comandos útiles (desde cualquier carpeta, también por SSH):
+      bot-estado        ¿está arriba? ¿en qué commit? ¿hay algo nuevo?
+      bot-actualizar    traer de GitHub, probar y reiniciar
+      bot-reiniciar     reiniciar sin traer cambios
+      bot-log           últimas 40 líneas
+
       .\hosting\desinstalar.ps1   quitar el arranque automático
-      Get-Content .\logs\bot.log -Tail 50 -Wait     ver el log en vivo
 
 "@

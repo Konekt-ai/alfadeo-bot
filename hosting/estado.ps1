@@ -11,10 +11,16 @@
 
 param(
   [string]$NombreTarea = 'ALFA-DEO Bot WhatsApp',
-  [int]$LineasLog = 25
+  [int]$LineasLog = 25,
+
+  # Se salta la consulta a GitHub. Útil si la PC está sin internet y no quieres
+  # esperar el timeout.
+  [switch]$SinRed
 )
 
 $RaizBot = Split-Path -Parent $PSScriptRoot
+
+. (Join-Path $PSScriptRoot 'comun.ps1')
 
 function Titulo { param([string]$m) Write-Host "`n== $m ==" -ForegroundColor Cyan }
 function Ok     { param([string]$m) Write-Host "   [OK]    $m" -ForegroundColor Green }
@@ -28,12 +34,7 @@ Write-Host "`nEstado del bot ALFA-DEO — $(Get-Date -Format 'yyyy-MM-dd HH:mm:s
 # saber al diagnosticar es qué versión está corriendo.
 Titulo 'Versión desplegada'
 
-# Por ruta y no por PATH: en esta PC hay un C:\alfadeo\git.ps1 que en PowerShell
-# le gana al git de verdad, porque los scripts tienen precedencia sobre los .exe.
-$git = @(
-  'C:\Program Files\Git\cmd\git.exe',
-  'C:\alfadeo\git\cmd\git.exe'
-) | Where-Object { Test-Path $_ } | Select-Object -First 1
+$git = Buscar-Git
 
 if ($null -eq $git) {
   Nota 'No encuentro git.exe, no puedo decirte qué versión está desplegada.'
@@ -44,8 +45,25 @@ if ($null -eq $git) {
 
   $sucio = @(& $git -C $RaizBot status --porcelain)
   if ($sucio.Count -gt 0) {
-    Nota "$($sucio.Count) archivo(s) editado(s) a mano aquí; el próximo hosting\actualizar.cmd los descarta:"
+    Nota "$($sucio.Count) archivo(s) editado(s) a mano aquí; el próximo bot-actualizar los descarta:"
     foreach ($s in $sucio) { Write-Host "             $s" -ForegroundColor Yellow }
+  }
+
+  # ¿Hay algo en GitHub que no esté aquí? Es una consulta de red, así que se
+  # hace en silencio y sin tumbar el diagnóstico si la PC está sin internet.
+  if (-not $SinRed) {
+    & $git -C $RaizBot fetch origin main -q 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      Nota 'No pude consultar GitHub (¿sin internet?). El resto del diagnóstico sigue siendo válido.'
+    } else {
+      $pendientes = @(& $git -C $RaizBot log --oneline HEAD..origin/main)
+      if ($pendientes.Count -eq 0) {
+        Ok 'Al día con GitHub'
+      } else {
+        Nota "$($pendientes.Count) commit(s) en GitHub que no están aquí. Corre: bot-actualizar"
+        foreach ($p in $pendientes) { Write-Host "             $p" -ForegroundColor Yellow }
+      }
+    }
   }
 }
 
@@ -101,12 +119,7 @@ if ($procesos.Count -eq 0) {
 
 # --- Health check ------------------------------------------------------------
 Titulo 'Respuesta local'
-$puerto = 3000
-$rutaEnv = Join-Path $RaizBot '.env'
-if (Test-Path $rutaEnv) {
-  $textoEnv = Get-Content $rutaEnv -Raw
-  if ($textoEnv -match '(?m)^\s*PORT\s*=\s*(\d+)') { $puerto = [int]$Matches[1] }
-}
+$puerto = Obtener-PuertoBot -RaizBot $RaizBot
 
 try {
   $r = Invoke-RestMethod -Uri "http://localhost:$puerto/health" -TimeoutSec 5

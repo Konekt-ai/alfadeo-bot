@@ -24,37 +24,18 @@ param(
 $ErrorActionPreference = 'Stop'
 $RaizBot = Split-Path -Parent $PSScriptRoot
 
+. (Join-Path $PSScriptRoot 'comun.ps1')
+
 function Paso  { param([string]$m) Write-Host "`n==> $m" -ForegroundColor Cyan }
 function Bien  { param([string]$m) Write-Host "    OK  $m" -ForegroundColor Green }
 function Aviso { param([string]$m) Write-Host "    !   $m" -ForegroundColor Yellow }
 function Alto  { param([string]$m) Write-Host "`nERROR: $m" -ForegroundColor Red; exit 1 }
 
 # --- Herramientas ------------------------------------------------------------
-# Igual que en supervisor.ps1: no basta con el PATH. Aqu铆 adem谩s hay que evitar
-# C:\alfadeo\git.ps1, que en PowerShell le gana al git de verdad porque los
-# scripts tienen precedencia sobre los .exe.
-function Buscar-Herramienta {
-  param([string]$Nombre, [string[]]$Candidatas)
-
-  foreach ($c in $Candidatas) { if (Test-Path $c) { return $c } }
-
-  $cmd = Get-Command $Nombre -All -ErrorAction SilentlyContinue |
-         Where-Object { $_.CommandType -eq 'Application' } |
-         Select-Object -First 1
-  if ($cmd) { return $cmd.Source }
-  return $null
-}
-
-$GIT = Buscar-Herramienta 'git' @(
-  'C:\Program Files\Git\cmd\git.exe',
-  'C:\alfadeo\git\cmd\git.exe'
-)
+$GIT = Buscar-Git
 if (-not $GIT) { Alto 'No encuentro git.exe.' }
 
-$NPM = Buscar-Herramienta 'npm' @(
-  'C:\Program Files\nodejs\npm.cmd',
-  'C:\alfadeo\node\npm.cmd'
-)
+$NPM = Buscar-Npm
 if (-not $NPM) { Alto 'No encuentro npm.cmd.' }
 
 Set-Location $RaizBot
@@ -64,8 +45,7 @@ if (-not (Test-Path (Join-Path $RaizBot '.env'))) { Alto "Falta $RaizBot\.env 鈥
 
 # La tarea del bot es de SYSTEM: detenerla y arrancarla necesita privilegios.
 # Por SSH con una cuenta de administrador la sesi贸n ya viene elevada.
-$identidad = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
-if (-not $identidad.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+if (-not (Test-EsAdministrador)) {
   Alto 'Hay que correr esto como administrador (la tarea del bot corre como SYSTEM).'
 }
 
@@ -172,44 +152,21 @@ o regresa a la versi贸n anterior con:
 # --- 5. Reiniciar ------------------------------------------------------------
 Paso 'Reiniciando el bot'
 
-try { Stop-ScheduledTask -TaskName $NombreTarea -ErrorAction SilentlyContinue } catch {}
-
-# La tarea lanza al supervisor, y el supervisor lanza a node. Al detener la
-# tarea el node hijo puede sobrevivir, as铆 que se baja a mano.
-# El filtro es estricto a prop贸sito: en esta misma PC corre el panel con otro
-# node (`next start`), y ese no se toca.
-$hijos = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-         Where-Object { $_.CommandLine -like '*src\server.js*' }
-foreach ($h in $hijos) {
-  Stop-Process -Id $h.ProcessId -Force -ErrorAction SilentlyContinue
-}
+Detener-Bot -NombreTarea $NombreTarea | Out-Null
 Start-Sleep -Seconds 2
-
-Start-ScheduledTask -TaskName $NombreTarea
+Iniciar-Bot -NombreTarea $NombreTarea
 
 # --- 6. Comprobar ------------------------------------------------------------
 Paso 'Comprobando que responda'
 
-$puerto = 3000
-$contenidoEnv = Get-Content (Join-Path $RaizBot '.env') -Raw
-if ($contenidoEnv -match '(?m)^\s*PORT\s*=\s*(\d+)') { $puerto = [int]$Matches[1] }
+$puerto   = Obtener-PuertoBot -RaizBot $RaizBot
+$segundos = Esperar-Salud -Puerto $puerto
 
-$vivo = $false
-for ($i = 1; $i -le 30; $i++) {
-  Start-Sleep -Seconds 2
-  try {
-    $r = Invoke-RestMethod -Uri "http://localhost:$puerto/health" -TimeoutSec 3
-    if ($r.ok -eq $true) {
-      Bien "Responde en http://localhost:$puerto/health (a los $($i*2)s)"
-      $vivo = $true
-      break
-    }
-  } catch { }
+if ($segundos -lt 0) {
+  Alto "El bot no respondi贸 en 60s. Revisa: bot-log"
 }
 
-if (-not $vivo) {
-  Alto "El bot no respondi贸 en 60s. Revisa: Get-Content $RaizBot\logs\bot.log -Tail 50"
-}
+Bien "Responde en http://localhost:$puerto/health (a los ${segundos}s)"
 
 Write-Host "`n===============================================" -ForegroundColor White
 Write-Host "  Listo. Bot actualizado y corriendo." -ForegroundColor White

@@ -72,8 +72,13 @@ alfadeo-bot/
 ├─ hosting/                      # para correrlo en la PC de la empresa
 │  ├─ README.md                  # guía de instalación paso a paso
 │  ├─ instalar.ps1               # arranque automático + servicio
+│  ├─ instalar-comandos.ps1      # deja bot-estado, bot-actualizar... en el PATH
 │  ├─ supervisor.ps1             # mantiene el bot vivo y rota logs
-│  ├─ estado.ps1                 # diagnóstico
+│  ├─ comun.ps1                  # funciones compartidas (dot-source)
+│  ├─ actualizar.ps1             # bot-actualizar: traer, probar y reiniciar
+│  ├─ estado.ps1                 # bot-estado: diagnóstico
+│  ├─ reiniciar.ps1              # bot-reiniciar
+│  ├─ log.ps1                    # bot-log
 │  ├─ desinstalar.ps1
 │  └─ config-cloudflared.yml     # plantilla del túnel
 ├─ web/boton-whatsapp.html       # botón flotante para la página web
@@ -242,17 +247,25 @@ ningún puerto del router. `hosting\estado.ps1` diagnostica todo de un vistazo.
 
 ### Publicar cambios
 
-Programas aquí, pruebas en local, `git push`. Y en la PC de la empresa, un solo
-comando — que funciona igual por SSH, sin abrir escritorio remoto:
+Programas aquí, pruebas en local, `git push`. Y en la PC de la empresa:
 
-```powershell
-ssh DELL@192.168.1.116 C:\alfadeo-bot\hosting\actualizar.cmd
+```text
+ssh alfadeo-bot
+bot-estado        # ¿está arriba? ¿en qué commit? ¿hay algo nuevo?
+bot-actualizar    # traer, probar y reiniciar
 ```
 
-Trae los cambios, reinstala sólo si cambió el lockfile, corre las pruebas y
-reinicia. **Si las pruebas fallan no reinicia**, así el bot se queda contestando
-con la versión anterior. Detalles en
-[hosting/README.md](hosting/README.md#actualizar-el-bot).
+También sirven de un tiro, sin entrar:
+
+```powershell
+ssh alfadeo-bot bot-actualizar
+```
+
+`bot-actualizar` trae los cambios, reinstala sólo si cambió el lockfile, corre
+las pruebas y reinicia. **Si las pruebas fallan no reinicia**, así el bot se
+queda contestando con la versión anterior. Los otros comandos (`bot-reiniciar`,
+`bot-log`) y cómo dejar el SSH sin contraseña, en
+[hosting/README.md](hosting/README.md#operación-diaria).
 
 ### En Railway (respaldo)
 
