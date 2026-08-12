@@ -258,15 +258,40 @@ Restart-ScheduledTask -TaskName 'ALFA-DEO Bot WhatsApp'   # reiniciar
 
 ### Actualizar el bot
 
+El día a día es: programas en tu máquina, pruebas en local, `git push`. Y aquí,
+un solo comando:
+
 ```powershell
-cd C:\alfadeo-bot
-Stop-ScheduledTask -TaskName 'ALFA-DEO Bot WhatsApp'
-git pull
-npm ci --omit=dev
-npm test
-Start-ScheduledTask -TaskName 'ALFA-DEO Bot WhatsApp'
-.\hosting\estado.ps1
+C:\alfadeo-bot\hosting\actualizar.cmd
 ```
+
+Funciona igual por SSH desde donde programas, sin abrir escritorio remoto:
+
+```powershell
+ssh DELL@192.168.1.116 C:\alfadeo-bot\hosting\actualizar.cmd
+```
+
+El script se encarga de todo:
+
+1. Busca cambios en GitHub. **Si no hay nada nuevo, no toca nada** y termina
+   (usa `-Forzar` si quieres reinstalar y reiniciar de todos modos).
+2. Te lista los commits que entran, y te avisa si hay cambios locales en la PC
+   que se van a descartar.
+3. Se alinea con `origin/main`.
+4. Reinstala dependencias **sólo si cambió `package-lock.json`**.
+5. Corre las pruebas.
+6. Reinicia el bot y comprueba que responda `/health`.
+
+> **Por qué `reset --hard` y no `git pull`:** esta PC es un destino de
+> despliegue, no un lugar donde se programa. Con `pull`, cualquier archivo
+> editado aquí produce un conflicto de merge, y un conflicto a media mañana
+> significa que el bot se queda sin actualizar y nadie se entera. Con `reset`
+> el resultado es siempre el mismo: exactamente lo que hay en `origin/main`.
+
+**Si las pruebas fallan, no reinicia.** El bot sigue contestando con la versión
+anterior, que ya está cargada en memoria. Eso sí: los archivos en disco ya son
+los nuevos, así que arregla y vuelve a correrlo, o regresa a la versión buena
+con `git reset --hard <commit>` (el script te imprime cuál era).
 
 ### Cambiar textos del bot
 

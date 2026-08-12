@@ -89,6 +89,14 @@ if ($contenidoEnv -notmatch '(?m)^\s*RUTEO_ASESORES\s*=\s*\S') {
 # --- 3. Dependencias ---------------------------------------------------------
 Paso 'Instalando dependencias'
 Push-Location $RaizBot
+
+# npm manda sus avisos (EBADENGINE, audit, deprecaciones) por stderr. En
+# PowerShell 5.1, con ErrorActionPreference='Stop', redirigir stderr de un
+# programa externo convierte cada línea en un error TERMINANTE y aborta la
+# instalación aunque npm haya salido con código 0. Bajamos la guardia sólo
+# alrededor de npm: quien manda aquí es $LASTEXITCODE, no lo que escupa stderr.
+$preferenciaPrevia = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 try {
   if (Test-Path (Join-Path $RaizBot 'package-lock.json')) {
     & npm ci --omit=dev 2>&1 | Out-Null
@@ -109,6 +117,7 @@ try {
     }
   }
 } finally {
+  $ErrorActionPreference = $preferenciaPrevia
   Pop-Location
 }
 

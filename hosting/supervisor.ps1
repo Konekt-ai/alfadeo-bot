@@ -64,18 +64,35 @@ if (-not (Test-Path $Entrada)) {
   exit 1
 }
 
-$node = Get-Command node -ErrorAction SilentlyContinue
-if ($null -eq $node) {
-  Write-Log 'Node.js no está en el PATH. Instálalo con: winget install OpenJS.NodeJS.LTS' 'ERROR'
+# La tarea programada corre como SYSTEM, y SYSTEM no hereda el PATH del usuario.
+# Si sólo confiáramos en Get-Command, el bot no arrancaría nunca tras un reinicio
+# aunque node estuviera instalado. Por eso buscamos también en las rutas de
+# siempre, incluido el Node portable que ya usa el panel.
+$rutaNode = (Get-Command node -ErrorAction SilentlyContinue).Source
+
+if (-not $rutaNode) {
+  $rutaNode = @(
+    'C:\Program Files\nodejs\node.exe',
+    'C:\alfadeo\node\node.exe',
+    (Join-Path $env:LOCALAPPDATA 'Programs\nodejs\node.exe')
+  ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
+if (-not $rutaNode) {
+  Write-Log 'No encuentro node.exe (ni en el PATH ni en las rutas habituales). Instálalo con: winget install OpenJS.NodeJS.LTS' 'ERROR'
   exit 1
 }
+
+# Los procesos hijos invocan `node` por nombre, no por ruta: hay que dejarlo
+# en el PATH de este proceso aunque lo hayamos encontrado a mano.
+$env:Path = (Split-Path -Parent $rutaNode) + ';' + $env:Path
 
 if (-not (Test-Path (Join-Path $RaizBot '.env'))) {
   Write-Log 'Falta el archivo .env. Cópialo de .env.example y llénalo.' 'ERROR'
   exit 1
 }
 
-Write-Log "Supervisor iniciado. Node: $($node.Source)"
+Write-Log "Supervisor iniciado. Node: $rutaNode"
 Write-Log "Raíz del bot: $RaizBot"
 
 # --- Ciclo de supervisión ----------------------------------------------------
@@ -93,7 +110,7 @@ while ($true) {
     $tmpOut = Join-Path $CarpetaLogs 'salida.tmp'
     $tmpErr = Join-Path $CarpetaLogs 'error.tmp'
 
-    $proceso = Start-Process -FilePath $node.Source `
+    $proceso = Start-Process -FilePath $rutaNode `
                              -ArgumentList 'src\server.js' `
                              -WorkingDirectory $RaizBot `
                              -RedirectStandardOutput $tmpOut `
