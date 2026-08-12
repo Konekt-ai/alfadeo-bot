@@ -240,7 +240,25 @@ Resumen: `hosting\instalar.ps1` deja el bot arrancando solo al encender la PC y
 reviviéndose si se cae; Cloudflare Tunnel le da URL pública con HTTPS sin abrir
 ningún puerto del router. `hosting\estado.ps1` diagnostica todo de un vistazo.
 
-### En Railway
+### Publicar cambios
+
+Programas aquí, pruebas en local, `git push`. Y en la PC de la empresa, un solo
+comando — que funciona igual por SSH, sin abrir escritorio remoto:
+
+```powershell
+ssh DELL@192.168.1.116 C:\alfadeo-bot\hosting\actualizar.cmd
+```
+
+Trae los cambios, reinstala sólo si cambió el lockfile, corre las pruebas y
+reinicia. **Si las pruebas fallan no reinicia**, así el bot se queda contestando
+con la versión anterior. Detalles en
+[hosting/README.md](hosting/README.md#actualizar-el-bot).
+
+### En Railway (respaldo)
+
+El bot ya no vive aquí, pero `railway.json` y el `Procfile` se conservan para
+poder reactivarlo si la PC de la empresa se cae y hay que volver rápido. Meta
+entrega a **una sola** URL, así que reactivarlo es cambiar la Callback URL.
 
 1. Sube el repo a GitHub.
 2. Railway: **New Project → Deploy from GitHub repo**.
