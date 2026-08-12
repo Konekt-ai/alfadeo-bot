@@ -23,6 +23,32 @@ function Nota   { param([string]$m) Write-Host "   [ ]     $m" -ForegroundColor 
 
 Write-Host "`nEstado del bot ALFA-DEO — $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor White
 
+# --- Versión desplegada ------------------------------------------------------
+# Ahora que se despliega con hosting\actualizar.cmd, lo primero que uno quiere
+# saber al diagnosticar es qué versión está corriendo.
+Titulo 'Versión desplegada'
+
+# Por ruta y no por PATH: en esta PC hay un C:\alfadeo\git.ps1 que en PowerShell
+# le gana al git de verdad, porque los scripts tienen precedencia sobre los .exe.
+$git = @(
+  'C:\Program Files\Git\cmd\git.exe',
+  'C:\alfadeo\git\cmd\git.exe'
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($null -eq $git) {
+  Nota 'No encuentro git.exe, no puedo decirte qué versión está desplegada.'
+} elseif (-not (Test-Path (Join-Path $RaizBot '.git'))) {
+  Nota 'Esta copia no es un repositorio git: se instaló a mano.'
+} else {
+  Ok ((& $git -C $RaizBot log -1 --pretty='%h  %s  (%ar)') -join '')
+
+  $sucio = @(& $git -C $RaizBot status --porcelain)
+  if ($sucio.Count -gt 0) {
+    Nota "$($sucio.Count) archivo(s) editado(s) a mano aquí; el próximo hosting\actualizar.cmd los descarta:"
+    foreach ($s in $sucio) { Write-Host "             $s" -ForegroundColor Yellow }
+  }
+}
+
 # --- Tarea programada --------------------------------------------------------
 Titulo 'Arranque automático'
 $tarea = Get-ScheduledTask -TaskName $NombreTarea -ErrorAction SilentlyContinue
