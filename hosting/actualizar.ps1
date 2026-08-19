@@ -168,6 +168,26 @@ if ($segundos -lt 0) {
 
 Bien "Responde en http://localhost:$puerto/health (a los ${segundos}s)"
 
+# /health contesta 200 aunque la base no esté configurada: sólo dice que Express
+# arrancó. Sin esta comprobación, un despliegue con el .env a medias saldría
+# "todo bien" y el bot le contestaría a los clientes que no encuentra nada.
+Paso 'Comprobando la base'
+$ErrorActionPreference = 'Continue'
+try {
+  $salidaBase = & $NPM run probar-base 2>&1
+  if ($LASTEXITCODE -eq 0) {
+    Bien 'La base responde y los permisos alcanzan'
+  } else {
+    Aviso 'El bot está arriba pero NO puede trabajar contra la base:'
+    $salidaBase | ForEach-Object { Write-Host "        $_" -ForegroundColor Yellow }
+    Aviso 'Revisa DATABASE_URL en .env y sql\rol-bot.sql'
+  }
+} catch {
+  Aviso "No pude comprobar la base: $($_.Exception.Message)"
+} finally {
+  $ErrorActionPreference = 'Stop'
+}
+
 # --- 7. Comandos cortos ------------------------------------------------------
 # Auto-reparación: si falta algún envoltorio —porque es la primera vez, porque
 # alguien los borró, o porque una versión nueva agregó un comando— se rehacen
