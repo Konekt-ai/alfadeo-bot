@@ -10,7 +10,8 @@
     "test": "node --test \"pruebas/*.test.mjs\"",
     "verificar-catalogo": "node scripts/verificar-catalogo.mjs",
     "simular": "node scripts/simular-conversacion.mjs",
-    "probar-base": "node scripts/probar-base.mjs"
+    "probar-base": "node scripts/probar-base.mjs",
+    "probar-webhook": "node scripts/probar-webhook.mjs"
   },
   "engines": {
     "node": ">=20"

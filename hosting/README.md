@@ -131,6 +131,41 @@ Al terminar deberías ver `El bot responde en http://localhost:3000/health`.
 
 ---
 
+## El día que Meta autorice
+
+Todo lo que no depende de Meta ya está hecho: el bot corre, la base responde,
+los comandos remotos funcionan y `cloudflared` está instalado y en el PATH.
+Falta esto, en este orden:
+
+1. **Pon `META_APP_SECRET` en el `.env`** (Meta → tu app → Configuración →
+   Básica → Clave secreta). Hazlo **antes** de que la URL sea pública: sin él
+   no se valida la firma y cualquiera que la descubra puede inventar mensajes.
+   Luego `bot-reiniciar`.
+
+2. **Monta el túnel** — sección 3 de aquí abajo. Es el único paso que necesita
+   navegador, porque Cloudflare pide autorizar el dominio a mano.
+
+3. **Comprueba la URL pública antes de tocar el panel de Meta:**
+
+   ```powershell
+   npm run probar-webhook https://bot.tudominio.com
+   ```
+
+   Hace exactamente lo que hará Meta: el handshake de verificación, el rechazo
+   con token equivocado y un evento firmado. Si algo falla, aquí lo dice claro;
+   en el panel de Meta el error no te va a decir nada útil.
+
+4. **Registra el webhook en Meta** — sección 4. Callback URL
+   `https://bot.tudominio.com/webhook`, verify token el del `.env`, y confirma
+   que `messages` siga suscrito.
+
+5. **Manda un WhatsApp de verdad** al número del negocio.
+
+Si algo no contesta, el orden para diagnosticar es: `bot-estado` → `bot-log` →
+`npm run probar-base` → `npm run probar-webhook`.
+
+---
+
 ## 3. Túnel de Cloudflare
 
 ### 3.1 Si tu dominio todavía no está en Cloudflare
