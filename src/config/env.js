@@ -50,9 +50,16 @@ export const env = {
   WHATSAPP_VERIFY_TOKEN: requerida('WHATSAPP_VERIFY_TOKEN'),
   GRAPH_API_VERSION: opcional('GRAPH_API_VERSION', 'v21.0'),
 
-  // ===== Supabase =====
-  SUPABASE_URL: requerida('SUPABASE_URL'),
-  SUPABASE_SERVICE_ROLE_KEY: requerida('SUPABASE_SERVICE_ROLE_KEY'),
+  // Secreto de la app de Meta, para validar la firma de los webhooks.
+  // Opcional para no romper instalaciones viejas, pero sin él cualquiera que
+  // descubra la URL pública puede inyectar mensajes falsos. Ver server.js.
+  META_APP_SECRET: opcional('META_APP_SECRET', ''),
+
+  // ===== Base de datos =====
+  // PostgreSQL corre en la MISMA computadora que el bot: no hay nube y nada
+  // sale a internet. Formato:
+  //   postgresql://usuario:contrasena@localhost:5433/alfadeo
+  DATABASE_URL: requerida('DATABASE_URL'),
 
   // ===== Equipo interno =====
   // Respaldo: recibe TODAS las solicitudes, sin importar la plaza.
@@ -97,9 +104,20 @@ export function validarEntorno() {
   if (faltantes.length > 0) {
     logger.error(
       `Faltan variables de entorno obligatorias: ${faltantes.join(', ')}. ` +
-        'Configúralas en .env (local) o en Railway (producción).'
+        'Configúralas en el archivo .env de esta carpeta.'
     );
     ok = false;
+  }
+
+  // Sin secreto de app no se puede comprobar que el webhook venga de Meta.
+  // No es motivo para no arrancar, pero sí para avisar fuerte: con la URL
+  // pública, cualquiera podría inyectar mensajes falsos.
+  if (!env.META_APP_SECRET) {
+    logger.warn(
+      'META_APP_SECRET sin configurar: NO se valida la firma de los webhooks. ' +
+        'Cualquiera que conozca la URL puede simular mensajes de WhatsApp. ' +
+        'Sácalo de Meta for Developers → tu app → Configuración → Básica.'
+    );
   }
 
   const numericas = [

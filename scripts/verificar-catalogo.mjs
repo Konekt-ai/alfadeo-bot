@@ -1,36 +1,44 @@
-// Verifica que la migración del catálogo haya quedado bien (minuta 17-20, 28).
+// Verifica que el catálogo esté bien cargado en la base (minuta 17-20, 28).
 //
-// Correr DESPUÉS de aplicar supabase/reunion-catalogo-sucursales.sql:
 //     npm run verificar-catalogo
 //
-// Revisa tres cosas:
-//   1. Que las columnas nuevas existan y estén pobladas.
-//   2. Que la búsqueda por nombre comercial y por genérico devuelva algo.
-//   3. Que el inventario esté asignado a una sucursal.
+// Revisa cuatro cosas:
+//   1. Que las columnas del catálogo existan y estén pobladas.
+//   2. Que el IVA esté bien clasificado.
+//   3. Que la búsqueda por nombre comercial y por genérico devuelva algo.
+//   4. Que el inventario esté asignado a una sucursal.
+//
+// Lee de la base local (DATABASE_URL). Es de sólo lectura: no modifica nada.
 import 'dotenv/config';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+import { sql, cerrarPool } from '../src/lib/db.js';
 
 let problemas = 0;
 const aviso = (msg) => { problemas++; console.log(`  ⚠️  ${msg}`); };
 
+async function terminar(codigo) {
+  await cerrarPool();
+  process.exit(codigo);
+}
+
 console.log('\n=== 1. Columnas del catálogo (minuta 17) ===');
-const { data: prods, error: errProd } = await supabase
-  .from('productos')
-  .select('id, nombre, nombre_comercial, nombre_generico, concentracion, forma_farmaceutica, presentacion, tasa_iva');
+const { data: prods, error: errProd } = await sql(
+  `select id, nombre, nombre_comercial, nombre_generico, concentracion,
+          forma_farmaceutica, presentacion, tasa_iva
+     from productos`
+);
 
 if (errProd) {
   console.log(`  ❌ No se pudo leer productos: ${errProd.message}`);
-  console.log('     ¿Ya corriste supabase/reunion-catalogo-sucursales.sql?');
-  process.exit(1);
+  console.log('     ¿Ya se corrieron las migraciones de la base?');
+  await terminar(1);
 }
 
 const total = prods.length;
+if (total === 0) {
+  console.log('  ❌ La tabla productos está vacía.');
+  await terminar(1);
+}
+
 const cuenta = (campo) => prods.filter((p) => p[campo]).length;
 
 for (const campo of ['nombre_comercial', 'nombre_generico', 'concentracion', 'forma_farmaceutica', 'presentacion']) {
@@ -52,7 +60,10 @@ console.log(`  Con IVA 16%:           ${total - tasa0}/${total}`);
 
 console.log('\n=== 3. Búsqueda por nombre (minuta 19, 20) ===');
 for (const q of ['ondansetron', 'vylkor', 'acido zoledronico', 'valsartan', 'capecitabina']) {
-  const { data, error } = await supabase.rpc('buscar_productos', { q, limite: 3 });
+  const { data, error } = await sql(
+    'select * from buscar_productos($1, $2) order by score desc',
+    [q, 3]
+  );
   if (error) {
     aviso(`buscar_productos('${q}') falló: ${error.message}`);
     continue;
@@ -64,9 +75,14 @@ for (const q of ['ondansetron', 'vylkor', 'acido zoledronico', 'valsartan', 'cap
 }
 
 console.log('\n=== 4. Inventario por sucursal (minuta 28) ===');
-const { data: inv, error: errInv } = await supabase
-  .from('inventario')
-  .select('id, existencia, sucursal_id, sucursales ( clave, nombre )');
+// Lo que en PostgREST era un select anidado `sucursales ( clave, nombre )`
+// aquí es un LEFT JOIN: el left importa, porque justo lo que se busca son
+// los registros de inventario SIN sucursal asignada.
+const { data: inv, error: errInv } = await sql(
+  `select i.id, i.existencia, i.sucursal_id, s.clave, s.nombre
+     from inventario i
+     left join sucursales s on s.id = i.sucursal_id`
+);
 
 if (errInv) {
   aviso(`No se pudo leer inventario con sucursal: ${errInv.message}`);
@@ -74,7 +90,7 @@ if (errInv) {
   const sinSucursal = inv.filter((i) => !i.sucursal_id).length;
   const porPlaza = {};
   for (const i of inv) {
-    const clave = i.sucursales?.clave ?? 'SIN ASIGNAR';
+    const clave = i.clave ?? 'SIN ASIGNAR';
     porPlaza[clave] = (porPlaza[clave] ?? 0) + 1;
   }
   for (const [clave, n] of Object.entries(porPlaza)) {
@@ -88,4 +104,4 @@ console.log(
     ? '\n✅ Catálogo verificado, sin problemas.\n'
     : `\n⚠️  ${problemas} punto(s) a revisar.\n`
 );
-process.exit(problemas === 0 ? 0 : 1);
+await terminar(problemas === 0 ? 0 : 1);

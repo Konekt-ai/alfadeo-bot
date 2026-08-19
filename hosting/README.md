@@ -21,10 +21,9 @@ Tiempo estimado: 40 minutos la primera vez.
             ▼
    PC de la empresa
      ├─ cloudflared  (servicio de Windows)
-     └─ node src/server.js  (tarea programada + supervisor)
-            │
-            ▼
-        Supabase
+     ├─ node src/server.js  (tarea programada + supervisor)
+     ├─ panel Next.js       (tarea programada, puerto 3002)
+     └─ PostgreSQL 17       (localhost:5433, NO sale a internet)
 ```
 
 Lo importante: **la conexión la abre la PC hacia afuera**. No hay puertos
@@ -76,6 +75,16 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
+Y crea el usuario de base del bot, con permisos mínimos (una sola vez):
+
+```powershell
+psql -U postgres -p 5433 -d alfadeo -f sql\rol-bot.sql
+```
+
+Ese rol sólo alcanza las seis tablas que el bot usa y la función de búsqueda:
+no puede borrar nada, ni ver ventas, ni tocar inventario. **No pongas en
+`DATABASE_URL` el usuario `alfadeo` que usa el panel.**
+
 Rellena como mínimo:
 
 | Variable | De dónde sale |
@@ -83,8 +92,8 @@ Rellena como mínimo:
 | `WHATSAPP_TOKEN` | Meta for Developers → tu app → WhatsApp → API Setup |
 | `WHATSAPP_PHONE_NUMBER_ID` | Mismo lugar. Es el **ID**, no el número visible |
 | `WHATSAPP_VERIFY_TOKEN` | Lo inventas tú; debe coincidir con el que pongas en Meta |
-| `SUPABASE_URL` | Supabase → Project Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | Igual. Es la **service role**, no la anon |
+| `DATABASE_URL` | `postgresql://bot:CONTRASENA@localhost:5433/alfadeo` |
+| `META_APP_SECRET` | Meta → tu app → Configuración → Básica → Clave secreta |
 | `RUTEO_ASESORES` | `GDL:5213312345678,MTY:5218112345678` |
 | `INTERNAL_NOTIFY_NUMBERS` | Números de respaldo que reciben todo |
 
@@ -121,10 +130,14 @@ Al terminar deberías ver `El bot responde en http://localhost:3000/health`.
 
 Cloudflare necesita administrar el **DNS** del dominio. Es gratis.
 
-**Esto NO mueve tu hosting y NO rompe Vercel.** Cloudflare sólo resuelve
-nombres; el panel se sigue sirviendo desde Vercel exactamente igual. Lo único
-que pasa es que los registros DNS que hoy están en tu proveedor los copias a
-Cloudflare.
+**Esto sólo mueve el DNS, no mueve nada más.** Cloudflare se limita a resolver
+nombres: los registros que hoy tienes se copian tal cual y todo sigue apuntando
+a donde apuntaba.
+
+> **Revisa el correo antes de confirmar.** El dominio `alfadeo.mx` tiene el
+> correo en IONOS. Si los registros **MX** y el **SPF** no quedan copiados en
+> Cloudflare, el correo de la empresa deja de llegar el día que propague el
+> cambio, y nadie lo nota hasta que alguien reclama.
 
 1. Entra a [dash.cloudflare.com](https://dash.cloudflare.com) → **Add a site**.
 2. Escribe tu dominio y elige el plan **Free**.
@@ -390,9 +403,10 @@ ventana de mantenimiento activo de Windows fuera del horario de atención.
 **La PC no debe suspenderse.** `instalar.ps1` ya lo desactiva con corriente. Si
 es una laptop, déjala siempre conectada: con batería el comportamiento cambia.
 
-**El `.env` tiene llaves con acceso total a la base.** Cualquiera con acceso a
-esa PC puede leerlo. Ponle contraseña al usuario de Windows y no dejes la sesión
-abierta.
+**El `.env` tiene la contraseña de la base.** Ya no es una llave maestra —el rol
+`bot` sólo alcanza seis tablas y no puede borrar— pero con ella se leen los
+datos de los clientes y sus solicitudes. Ponle contraseña al usuario de Windows
+y no dejes la sesión abierta.
 
 **Un solo punto de falla.** Antes estaba en Railway con reinicio automático; una
 PC de oficina depende de la luz, del internet y de que nadie la apague. Si el bot

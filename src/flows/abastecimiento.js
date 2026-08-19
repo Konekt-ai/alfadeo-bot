@@ -15,7 +15,7 @@
 //   · Las preguntas frecuentes se contestan SIN perder el paso actual. Si a
 //     mitad de la captura preguntan "¿y cuándo llega?", se responde y se
 //     retoma donde iba.
-import { supabase, registrarMensaje } from '../lib/supabase.js';
+import { sql, uno, registrarMensaje } from '../lib/db.js';
 import { sendText, sendButtons, markRead } from '../lib/whatsapp.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
@@ -80,11 +80,10 @@ const RE_URGENCIA = /\b(urge|urgent\w*|inmediat\w*|para hoy|emergenc\w*|lo antes
 // ===================== Persistencia de la conversación =====================
 
 async function obtenerConversacion(wa_id) {
-  const { data, error } = await supabase
-    .from('conversaciones')
-    .select('*')
-    .eq('wa_id', wa_id)
-    .maybeSingle();
+  const { data, error } = await uno(
+    'select * from conversaciones where wa_id = $1',
+    [wa_id]
+  );
   if (error) {
     logger.warn('obtenerConversacion falló:', error.message);
     return null;
@@ -94,18 +93,30 @@ async function obtenerConversacion(wa_id) {
 
 async function guardarConversacion(wa_id, paso, contexto, cliente_id = null) {
   const ahora = new Date();
-  const fila = {
-    wa_id,
-    paso,
-    contexto: contexto ?? {},
-    ultima_actividad: ahora.toISOString(),
-    ventana_servicio_expira: new Date(ahora.getTime() + VENTANA_MS).toISOString(),
-  };
-  if (cliente_id) fila.cliente_id = cliente_id;
 
-  const { error } = await supabase
-    .from('conversaciones')
-    .upsert(fila, { onConflict: 'wa_id' });
+  // El coalesce del cliente_id reproduce lo que antes se hacía en JS quitando
+  // la clave del objeto: si en esta llamada no viene cliente_id, NO se pisa el
+  // que ya estuviera guardado. Es lo que evita perder el vínculo con el
+  // cliente a media conversación.
+  const { error } = await sql(
+    `insert into conversaciones
+       (wa_id, paso, contexto, ultima_actividad, ventana_servicio_expira, cliente_id)
+     values ($1, $2, $3::jsonb, $4, $5, $6)
+     on conflict (wa_id) do update set
+       paso                    = excluded.paso,
+       contexto                = excluded.contexto,
+       ultima_actividad        = excluded.ultima_actividad,
+       ventana_servicio_expira = excluded.ventana_servicio_expira,
+       cliente_id              = coalesce(excluded.cliente_id, conversaciones.cliente_id)`,
+    [
+      wa_id,
+      paso,
+      JSON.stringify(contexto ?? {}),
+      ahora.toISOString(),
+      new Date(ahora.getTime() + VENTANA_MS).toISOString(),
+      cliente_id || null,
+    ]
+  );
   if (error) logger.warn('guardarConversacion falló:', error.message);
 }
 
@@ -946,6 +957,28 @@ async function finalizarSolicitud({ wa_id, contexto, cliente_id }) {
       wa_id,
       'No pude registrar tu solicitud en este momento. Un asesor te contacta en breve. 🙏'
     );
+
+    // Al cliente se le acaba de prometer que alguien lo contacta, así que hay
+    // que avisarle a alguien de verdad. Antes esta rama no notificaba a nadie:
+    // el pedido se perdía en silencio y el cliente se quedaba esperando.
+    //
+    // Importa más ahora que la solicitud y sus renglones se guardan en una
+    // transacción: si algo truena, no queda ni el encabezado en la base, y este
+    // aviso por WhatsApp es el ÚNICO rastro que queda del pedido.
+    await notificarAsesor({
+      folio: 'SIN FOLIO — no se pudo guardar en la base',
+      claveSucursal,
+      cliente: contexto.nombre ?? contexto.nombrePerfil,
+      empresa: contexto.empresa,
+      telefono: wa_id,
+      tipo: contexto.tipo,
+      ciudad: contexto.ciudad,
+      items: items.map(aItemAviso),
+      requiereFactura: contexto.requiereFactura ?? undefined,
+      entrega: lineaEntregaCorta(enExistencia),
+      motivos: ['Falló el guardado en la base: capturen este pedido a mano'],
+    });
+
     await guardarConversacion(wa_id, PASO.FIN, contexto, cliente.id);
     return;
   }

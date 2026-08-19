@@ -28,7 +28,7 @@ globalThis.fetch = async (url, opciones) => {
   const destino = typeof url === 'string' ? url : url?.url ?? '';
 
   if (!destino.includes('graph.facebook.com')) {
-    return fetchReal(url, opciones); // Supabase pasa derecho
+    return fetchReal(url, opciones); // sólo se intercepta a Meta
   }
 
   const cuerpo = JSON.parse(opciones?.body ?? '{}');
@@ -52,7 +52,28 @@ globalThis.fetch = async (url, opciones) => {
 
 // --- 3. Cargar el bot ya con el entorno neutralizado ----------------------
 const { manejarMensaje } = await import('../src/flows/abastecimiento.js');
-const { supabase } = await import('../src/lib/supabase.js');
+const { sql, cerrarPool } = await import('../src/lib/db.js');
+
+// --- 3b. ¿Puede limpiar después? ------------------------------------------
+// Esta simulación escribe en la base REAL y borra al terminar. El rol del bot
+// no tiene DELETE a propósito (ver sql/rol-bot.sql), así que hay que
+// comprobarlo ANTES de escribir nada: si no, la corrida deja un cliente y un
+// pedido falsos a la vista de los asesores en el panel, y la siguiente corrida
+// les apila otro encima.
+{
+  const { error } = await sql(
+    "begin; delete from mensajes where wa_id = 'sonda-permiso-borrado'; rollback;"
+  );
+  if (error) {
+    console.error('\n\x1b[31mNo puedo correr la simulación: no tengo permiso para borrar.\x1b[0m');
+    console.error(`  ${error.message}\n`);
+    console.error('  Escribe en la base real y limpia al terminar, pero con el rol restringido');
+    console.error('  del bot no puede limpiar. Corre la prueba con el usuario del panel:\n');
+    console.error('    DATABASE_URL=postgresql://alfadeo:CONTRASENA@localhost:5433/alfadeo npm run simular\n');
+    await cerrarPool();
+    process.exit(1);
+  }
+}
 
 // --- 4. Los guiones -------------------------------------------------------
 //     Se elige con:  node scripts/simular-conversacion.mjs <escenario>
@@ -155,8 +176,11 @@ console.log('\n' + '═'.repeat(72));
 console.log('  LO QUE QUEDÓ EN LA BASE');
 console.log('═'.repeat(72));
 
-const { data: cliente } = await supabase
-  .from('clientes').select('*').eq('telefono_wa', WA_PRUEBA).maybeSingle();
+const { data: clientes } = await sql(
+  'select * from clientes where telefono_wa = $1',
+  [WA_PRUEBA]
+);
+const cliente = clientes?.[0] ?? null;
 
 if (cliente) {
   console.log('\nCliente:', JSON.stringify({
@@ -166,10 +190,25 @@ if (cliente) {
     requiere_factura: cliente.requiere_factura, sucursal_id: cliente.sucursal_id ? 'asignada' : null,
   }, null, 2));
 
-  const { data: sols } = await supabase
-    .from('solicitudes')
-    .select('folio, estado, urgencia, ciudad_entrega, requiere_humano, requiere_factura, datos_fiscales, sucursal_id, notas, solicitud_items(descripcion_libre, cantidad, presentacion, nota)')
-    .eq('cliente_id', cliente.id);
+  // El `solicitud_items(...)` anidado de PostgREST se reproduce con un
+  // jsonb_agg en subconsulta, para que la salida se siga viendo igual.
+  const { data: sols } = await sql(
+    `select s.folio, s.estado, s.urgencia, s.ciudad_entrega, s.requiere_humano,
+            s.requiere_factura, s.datos_fiscales, s.sucursal_id, s.notas,
+            coalesce(
+              (select jsonb_agg(jsonb_build_object(
+                        'descripcion_libre', i.descripcion_libre,
+                        'cantidad',          i.cantidad,
+                        'presentacion',      i.presentacion,
+                        'nota',              i.nota))
+                 from solicitud_items i
+                where i.solicitud_id = s.id),
+              '[]'::jsonb
+            ) as solicitud_items
+       from solicitudes s
+      where s.cliente_id = $1`,
+    [cliente.id]
+  );
 
   console.log('\nSolicitudes:', JSON.stringify(sols, null, 2));
 } else {
@@ -189,21 +228,27 @@ const borrar = async (etiqueta, promesa) => {
 };
 
 if (cliente) {
-  const { data: sols } = await supabase.from('solicitudes').select('id').eq('cliente_id', cliente.id);
+  const { data: sols } = await sql(
+    'select id from solicitudes where cliente_id = $1',
+    [cliente.id]
+  );
   const ids = (sols ?? []).map((s) => s.id);
   if (ids.length > 0) {
-    await borrar('solicitud_items', supabase.from('solicitud_items').delete().in('solicitud_id', ids));
-    await borrar('solicitudes', supabase.from('solicitudes').delete().in('id', ids));
+    // `= any($1)` es el equivalente del .in() de PostgREST y admite el arreglo
+    // como UN solo parámetro, sin armar la lista de marcadores a mano.
+    await borrar('solicitud_items', sql('delete from solicitud_items where solicitud_id = any($1)', [ids]));
+    await borrar('solicitudes', sql('delete from solicitudes where id = any($1)', [ids]));
   }
 }
-await borrar('conversaciones', supabase.from('conversaciones').delete().eq('wa_id', WA_PRUEBA));
-await borrar('mensajes', supabase.from('mensajes').delete().eq('wa_id', WA_PRUEBA));
+await borrar('conversaciones', sql('delete from conversaciones where wa_id = $1', [WA_PRUEBA]));
+await borrar('mensajes', sql('delete from mensajes where wa_id = $1', [WA_PRUEBA]));
 if (cliente) {
-  await borrar('clientes', supabase.from('clientes').delete().eq('telefono_wa', WA_PRUEBA));
+  await borrar('clientes', sql('delete from clientes where telefono_wa = $1', [WA_PRUEBA]));
 }
 
 console.log(errores === 0
   ? '\n✅ Simulación terminada. No quedó nada de prueba en la base.\n'
   : `\n⚠️  Quedaron ${errores} cosas sin borrar; revísalas a mano (wa_id ${WA_PRUEBA}).\n`);
 
+await cerrarPool();
 process.exit(errores === 0 ? 0 : 1);

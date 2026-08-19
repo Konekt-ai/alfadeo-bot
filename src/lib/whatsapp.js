@@ -1,5 +1,6 @@
 // Capa de integración con la WhatsApp Cloud API oficial de Meta (Graph API).
 // Usa fetch nativo de Node 20+. No se usa ninguna librería no oficial.
+import crypto from 'node:crypto';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
@@ -24,6 +25,40 @@ export function verifyWebhook(query) {
     return challenge ?? '';
   }
   return null;
+}
+
+/**
+ * Comprueba que el POST del webhook venga de verdad de Meta.
+ *
+ * Meta firma cada entrega con HMAC-SHA256 del cuerpo CRUDO usando el secreto
+ * de la app, y la manda en la cabecera X-Hub-Signature-256. Sin esta
+ * comprobación, cualquiera que descubra la URL pública puede inventar
+ * mensajes: crear solicitudes falsas y disparar avisos a los asesores.
+ *
+ * Se compara con timingSafeEqual y no con ===, para no filtrar por el tiempo
+ * de respuesta cuántos caracteres iniciales acertó quien lo intente.
+ *
+ * @param {Buffer|undefined} cuerpoCrudo - cuerpo tal cual llegó, sin parsear
+ * @param {string|undefined} firmaRecibida - cabecera x-hub-signature-256
+ * @returns {boolean}
+ */
+export function firmaValida(cuerpoCrudo, firmaRecibida) {
+  // Sin secreto configurado no hay nada con qué comparar. Se deja pasar para
+  // no tumbar instalaciones a medio configurar, pero validarEntorno() ya gritó.
+  if (!env.META_APP_SECRET) return true;
+
+  if (!firmaRecibida || !cuerpoCrudo) return false;
+
+  const esperada =
+    'sha256=' +
+    crypto.createHmac('sha256', env.META_APP_SECRET).update(cuerpoCrudo).digest('hex');
+
+  const a = Buffer.from(firmaRecibida);
+  const b = Buffer.from(esperada);
+
+  // timingSafeEqual exige el mismo largo; si difieren, ya es inválida.
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 /**

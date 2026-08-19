@@ -117,6 +117,36 @@ if ($procesos.Count -eq 0) {
   }
 }
 
+# --- Base de datos -----------------------------------------------------------
+# El bot dejo la nube: ahora la base es PostgreSQL en esta misma computadora.
+# Si el puerto no escucha, no hay nada mas que revisar.
+Titulo 'Base de datos'
+
+$rutaEnvBase = Join-Path $RaizBot '.env'
+$urlBase = $null
+if (Test-Path $rutaEnvBase) {
+  $textoEnvBase = Get-Content $rutaEnvBase -Raw
+  if ($textoEnvBase -match '(?m)^\s*DATABASE_URL\s*=\s*(\S+)') { $urlBase = $Matches[1] }
+}
+
+if (-not $urlBase) {
+  Falla 'Falta DATABASE_URL en .env. El bot no puede leer ni guardar nada.'
+} else {
+  # Se muestra sin la contrasenia: esto se corre por SSH y queda en pantalla.
+  Ok ("Configurada: " + ($urlBase -replace '://[^@]*@', '://***@'))
+
+  $puertoBase = 5433
+  if ($urlBase -match ':(\d+)/') { $puertoBase = [int]$Matches[1] }
+
+  $escucha = Get-NetTCPConnection -State Listen -LocalPort $puertoBase -ErrorAction SilentlyContinue
+  if ($escucha) {
+    Ok "PostgreSQL escuchando en el puerto $puertoBase"
+  } else {
+    Falla "Nada escucha en el puerto $puertoBase. Revisa el servicio de PostgreSQL."
+  }
+  Nota 'Prueba completa (permisos, tablas y busqueda):  npm run probar-base'
+}
+
 # --- Health check ------------------------------------------------------------
 Titulo 'Respuesta local'
 $puerto = Obtener-PuertoBot -RaizBot $RaizBot

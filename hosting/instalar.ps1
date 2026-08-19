@@ -67,20 +67,39 @@ No existía .env, así que lo creé a partir de .env.example:
 
     $rutaEnv
 
-Ábrelo y llena TODAS las variables (tokens de Meta, Supabase y los números
-de RUTEO_ASESORES). Luego corre este script otra vez.
+Ábrelo y llena TODAS las variables: los tokens de Meta, la DATABASE_URL de
+la base local y los números de RUTEO_ASESORES. Luego corre este script otra vez.
 "@
 }
 
 $contenidoEnv = Get-Content $rutaEnv -Raw
 $faltantes = @()
-foreach ($clave in @('WHATSAPP_TOKEN','WHATSAPP_PHONE_NUMBER_ID','WHATSAPP_VERIFY_TOKEN','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY')) {
+foreach ($clave in @('WHATSAPP_TOKEN','WHATSAPP_PHONE_NUMBER_ID','WHATSAPP_VERIFY_TOKEN','DATABASE_URL')) {
   if ($contenidoEnv -notmatch "(?m)^\s*$clave\s*=\s*\S") { $faltantes += $clave }
 }
 if ($faltantes.Count -gt 0) {
   Alto "Faltan valores en .env: $($faltantes -join ', ')"
 }
+# "No vacia" no basta para DATABASE_URL: .env.example trae un marcador de
+# posicion, y si nadie lo toca la comprobacion de arriba lo da por bueno. El bot
+# arrancaria y moriria en la primera consulta con "contrasena incorrecta".
+if ($contenidoEnv -match '(?m)^\s*DATABASE_URL\s*=\s*\S*CONTRASENA') {
+  Alto @'
+DATABASE_URL sigue con la contrasena de ejemplo (CONTRASENA).
+
+Crea el usuario de la base y pon su contrasena real:
+
+    psql -U postgres -p 5433 -d alfadeo -f sqlol-bot.sql
+
+Luego edita .env con esa contrasena y corre este script otra vez.
+'@
+}
+
 Bien 'El .env tiene todas las variables obligatorias'
+
+if ($contenidoEnv -notmatch '(?m)^\s*META_APP_SECRET\s*=\s*\S') {
+  Aviso 'META_APP_SECRET vacio: NO se valida la firma de los webhooks. Cualquiera que descubra la URL publica puede inventar mensajes.'
+}
 
 if ($contenidoEnv -notmatch '(?m)^\s*RUTEO_ASESORES\s*=\s*\S') {
   Aviso 'RUTEO_ASESORES está vacío: todas las solicitudes irán a INTERNAL_NOTIFY_NUMBERS sin distinguir plaza.'

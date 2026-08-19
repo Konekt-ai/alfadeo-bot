@@ -12,6 +12,7 @@ import { detectarIntencion, detectarIntenciones, requiereHumano, pareceProducto,
 import { limpiarConsulta, nombreProducto, fichaProducto, disponibilidadTexto, hayExistencia, sucursalesConStock, agruparLotes } from '../src/services/catalogo.js';
 import { extraerDatosFiscales, validarDatoFiscal, siguienteDatoFiscal, datosFiscalesCompletos, avisoIVA } from '../src/services/facturacion.js';
 import { resolverSucursal, plazaPorTexto } from '../src/services/ruteo.js';
+import { construirUpsertCliente } from '../src/services/solicitudes.js';
 
 // ---------------------------------------------------------------------------
 describe('utils/texto', () => {
@@ -327,5 +328,74 @@ describe('services/ruteo · a qué asesor va (minuta 15)', () => {
   test('sin pistas cae en la sucursal por defecto', () => {
     const r = resolverSucursal({ sucursalesConStock: [], ciudadEntrega: 'Mérida' });
     assert.equal(r.clave, 'GDL');
+  });
+});
+
+// ===========================================================================
+// El upsert de cliente es la única consulta del bot que arma su lista de
+// columnas en tiempo de ejecución. Se prueba aparte porque un descuido ahí
+// genera SQL inválido, y eso sólo se vería en producción.
+// ===========================================================================
+describe('services/solicitudes · SQL del upsert de cliente', () => {
+  test('sólo escribe las columnas que traen valor', () => {
+    const { texto, valores } = construirUpsertCliente({
+      telefono_wa: '5213312345678',
+      nombre: 'Diego',
+      empresa: null,        // null: no debe aparecer
+      ciudad: '',           // vacío: tampoco
+      rfc: undefined,       // ausente: tampoco
+    });
+
+    assert.match(texto, /insert into clientes \(telefono_wa, nombre\)/);
+    assert.doesNotMatch(texto, /empresa/);
+    assert.doesNotMatch(texto, /ciudad/);
+    assert.doesNotMatch(texto, /rfc/);
+    assert.deepEqual(valores, ['5213312345678', 'Diego']);
+  });
+
+  test('los marcadores van en orden y casan con los valores', () => {
+    const { texto, valores } = construirUpsertCliente({
+      telefono_wa: '521331', nombre: 'Ana', empresa: 'Hospital', ciudad: 'GDL',
+    });
+
+    assert.match(texto, /values \(\$1, \$2, \$3, \$4\)/);
+    assert.equal(valores.length, 4);
+    // Tantos marcadores como valores: si esto se desalinea, Postgres rechaza.
+    const marcadores = texto.match(/\$\d+/g) ?? [];
+    assert.equal(new Set(marcadores).size, valores.length);
+  });
+
+  test('el DO UPDATE no se pisa el teléfono a sí mismo', () => {
+    const { texto } = construirUpsertCliente({ telefono_wa: '521331', nombre: 'Ana' });
+    assert.match(texto, /do update set nombre = excluded\.nombre/);
+  });
+
+  test('con sólo el teléfono sigue siendo SQL válido', () => {
+    // Sin asignaciones, un "do update set" a secas no compila.
+    const { texto, valores } = construirUpsertCliente({ telefono_wa: '521331' });
+    assert.match(texto, /do update set telefono_wa = excluded\.telefono_wa/);
+    assert.deepEqual(valores, ['521331']);
+  });
+
+  test('requiere_factura en false se guarda, no se confunde con vacío', () => {
+    // Si el filtro usara "falsy" en vez de comparar contra null y '', un "no
+    // requiero factura" se perdería y volveríamos a preguntarlo cada vez.
+    const { texto, valores } = construirUpsertCliente({
+      telefono_wa: '521331', requiere_factura: false,
+    });
+    assert.match(texto, /requiere_factura/);
+    assert.deepEqual(valores, ['521331', false]);
+  });
+
+  test('ignora columnas que no están en la lista blanca', () => {
+    // Los nombres de columna se interpolan en el SQL, así que sólo pueden
+    // salir de COLUMNAS_CLIENTE y nunca de datos de entrada.
+    const { texto } = construirUpsertCliente({
+      telefono_wa: '521331',
+      '; drop table clientes; --': 'x',
+      columna_inventada: 'y',
+    });
+    assert.doesNotMatch(texto, /drop table/i);
+    assert.doesNotMatch(texto, /columna_inventada/);
   });
 });

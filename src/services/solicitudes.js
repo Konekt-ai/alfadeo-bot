@@ -1,7 +1,19 @@
 // Servicio de solicitudes: upsert de cliente, creación de solicitud e items.
-// Trabaja contra el esquema YA existente en Supabase.
-import { supabase } from '../lib/supabase.js';
+// Trabaja contra el esquema YA existente en la base local (localhost:5433).
+import { uno, enTransaccion } from '../lib/db.js';
 import { logger } from '../utils/logger.js';
+
+// Columnas que el bot puede escribir en `clientes`. Es una lista cerrada a
+// propósito: el upsert arma su SQL con los nombres de columna presentes, y
+// esos nombres NO pueden venir de datos de entrada. Los valores siempre van
+// parametrizados; los identificadores, sólo de esta lista.
+const COLUMNAS_CLIENTE = [
+  'telefono_wa', 'nombre', 'empresa', 'tipo', 'ciudad', 'correo', 'direccion',
+  'puesto', 'rfc', 'telefono', 'especificacion',
+  // Datos fiscales (minuta 1).
+  'razon_social', 'regimen_fiscal', 'uso_cfdi', 'cp_fiscal',
+  'correo_facturacion', 'requiere_factura', 'sucursal_id',
+];
 
 // Tipos de cliente válidos (enum en la BD). Se usa para normalizar la entrada.
 const TIPOS_CLIENTE = [
@@ -55,17 +67,54 @@ export function normalizarUrgencia(texto) {
  * @returns {Promise<object|null>}
  */
 export async function obtenerCliente(telefono_wa) {
-  const { data, error } = await supabase
-    .from('clientes')
-    .select('*')
-    .eq('telefono_wa', telefono_wa)
-    .maybeSingle();
+  const { data, error } = await uno(
+    'select * from clientes where telefono_wa = $1',
+    [telefono_wa]
+  );
 
   if (error) {
     logger.warn('obtenerCliente falló:', error.message);
     return null;
   }
   return data;
+}
+
+/**
+ * Arma el INSERT ... ON CONFLICT del upsert de cliente.
+ *
+ * Está separado y es puro para poder probarlo sin base de datos: es la única
+ * consulta del bot cuyo conjunto de columnas se decide en tiempo de ejecución,
+ * y por lo tanto la única donde un descuido rompe el SQL.
+ *
+ * Sólo se escriben las columnas que traen valor. Eso es lo que evita pisar con
+ * null datos que el cliente ya nos había dado en un mensaje anterior.
+ *
+ * @param {Record<string, unknown>} fila
+ * @returns {{texto: string, valores: unknown[]}}
+ */
+export function construirUpsertCliente(fila) {
+  const presentes = COLUMNAS_CLIENTE.filter(
+    (c) => fila[c] !== undefined && fila[c] !== null && fila[c] !== ''
+  );
+
+  const marcadores = presentes.map((_, i) => `$${i + 1}`);
+  const valores = presentes.map((c) => fila[c]);
+
+  const asignaciones = presentes
+    .filter((c) => c !== 'telefono_wa')
+    .map((c) => `${c} = excluded.${c}`);
+
+  // Si sólo llegó el teléfono no hay nada que actualizar, pero el DO UPDATE
+  // necesita asignar algo para que el RETURNING devuelva la fila.
+  if (asignaciones.length === 0) asignaciones.push('telefono_wa = excluded.telefono_wa');
+
+  const texto =
+    `insert into clientes (${presentes.join(', ')})\n` +
+    `     values (${marcadores.join(', ')})\n` +
+    `     on conflict (telefono_wa) do update set ${asignaciones.join(', ')}\n` +
+    `     returning *`;
+
+  return { texto, valores };
 }
 
 /**
@@ -108,16 +157,8 @@ export async function upsertCliente(datos) {
     sucursal_id: datos.sucursal_id ?? null,
   };
 
-  // Quitamos llaves nulas para no pisar datos previos con null en un upsert.
-  Object.keys(fila).forEach((k) => {
-    if (fila[k] === null || fila[k] === '') delete fila[k];
-  });
-
-  const { data, error } = await supabase
-    .from('clientes')
-    .upsert(fila, { onConflict: 'telefono_wa' })
-    .select()
-    .single();
+  const { texto, valores } = construirUpsertCliente(fila);
+  const { data, error } = await uno(texto, valores);
 
   if (error) {
     logger.error('upsertCliente falló:', error.message);
@@ -142,58 +183,72 @@ export async function upsertCliente(datos) {
  * @returns {Promise<{solicitud: object, folio: string}|null>}
  */
 export async function crearSolicitudConItems(params) {
-  // NO enviamos `folio`: en la BD es una columna identidad (GENERATED ALWAYS),
-  // la genera Supabase automáticamente. Lo leemos de vuelta con .select().
-  const { data: solicitud, error: errSol } = await supabase
-    .from('solicitudes')
-    .insert({
-      cliente_id: params.cliente_id,
-      canal: 'whatsapp',
-      estado: 'nueva',
-      urgencia: params.urgencia ?? 'normal',
-      ciudad_entrega: params.ciudad_entrega ?? null,
-      requiere_humano: !!params.requiere_humano,
-      notas: params.notas ?? null,
-      direccion_entrega: params.direccion_entrega ?? null,
-      tiempo_entrega: params.tiempo_entrega ?? null,
-      vigencia_cotizacion: params.vigencia_cotizacion ?? null,
-      nivel_urgencia: params.nivel_urgencia ?? null,
-      // Minuta 1: se pregunta al final del flujo y se guarda con la solicitud.
-      requiere_factura: params.requiere_factura ?? null,
-      datos_fiscales: params.datos_fiscales ?? null,
-      // Minuta 15 y 28: plaza que atiende la solicitud.
-      sucursal_id: params.sucursal_id ?? null,
-    })
-    .select()
-    .single();
+  // Todo en UNA transacción. Antes, con Supabase, la solicitud y sus renglones
+  // eran dos operaciones sueltas: si fallaban los renglones quedaba una
+  // solicitud vacía que igual se le notificaba al asesor, y él veía un pedido
+  // sin nada que cotizar. Ahora, o entra completa o no entra.
+  try {
+    return await enTransaccion(async (ejecutar) => {
+      // NO enviamos `folio`: en la BD es columna identidad (GENERATED ALWAYS),
+      // la asigna Postgres. Lo leemos de vuelta con RETURNING.
+      const filas = await ejecutar(
+        `insert into solicitudes (
+           cliente_id, canal, estado, urgencia, ciudad_entrega, requiere_humano,
+           notas, direccion_entrega, tiempo_entrega, vigencia_cotizacion,
+           nivel_urgencia, requiere_factura, datos_fiscales, sucursal_id
+         ) values (
+           $1, 'whatsapp', 'nueva', $2, $3, $4,
+           $5, $6, $7, $8,
+           $9, $10, $11::jsonb, $12
+         )
+         returning *`,
+        [
+          params.cliente_id,
+          params.urgencia ?? 'normal',
+          params.ciudad_entrega ?? null,
+          !!params.requiere_humano,
+          params.notas ?? null,
+          params.direccion_entrega ?? null,
+          params.tiempo_entrega ?? null,
+          params.vigencia_cotizacion ?? null,
+          params.nivel_urgencia ?? null,
+          // Minuta 1: se pregunta al final del flujo y se guarda con la solicitud.
+          params.requiere_factura ?? null,
+          params.datos_fiscales == null ? null : JSON.stringify(params.datos_fiscales),
+          // Minuta 15 y 28: plaza que atiende la solicitud.
+          params.sucursal_id ?? null,
+        ]
+      );
 
-  if (errSol) {
-    logger.error('crearSolicitud falló:', errSol.message);
+      const solicitud = filas[0];
+
+      // Un INSERT por renglón: son un puñado y van contra localhost, así que
+      // el costo es nulo y se lee mucho mejor que armar el VALUES a mano.
+      for (const it of params.items ?? []) {
+        await ejecutar(
+          `insert into solicitud_items (
+             solicitud_id, producto_id, descripcion_libre, cantidad, unidad,
+             nota, categoria, marca, presentacion
+           ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            solicitud.id,
+            it.producto_id ?? null,
+            it.descripcion_libre ?? null,
+            it.cantidad ?? null,
+            it.unidad ?? null,
+            it.nota ?? null,
+            it.categoria ?? null,
+            it.marca ?? null,
+            it.presentacion ?? null,
+          ]
+        );
+      }
+
+      // El folio definitivo es el que asignó la base de datos.
+      return { solicitud, folio: solicitud.folio };
+    });
+  } catch (e) {
+    logger.error('crearSolicitudConItems falló:', e?.message ?? e);
     return null;
   }
-
-  // El folio definitivo es el que asignó la base de datos.
-  const folio = solicitud.folio;
-
-  const items = (params.items ?? []).map((it) => ({
-    solicitud_id: solicitud.id,
-    producto_id: it.producto_id ?? null,
-    descripcion_libre: it.descripcion_libre ?? null,
-    cantidad: it.cantidad ?? null,
-    unidad: it.unidad ?? null,
-    nota: it.nota ?? null,
-    categoria: it.categoria ?? null,
-    marca: it.marca ?? null,
-    presentacion: it.presentacion ?? null,
-  }));
-
-  if (items.length > 0) {
-    const { error: errItems } = await supabase.from('solicitud_items').insert(items);
-    if (errItems) {
-      // La solicitud ya quedó creada; registramos el error de items pero no abortamos.
-      logger.error('crearSolicitudItems falló:', errItems.message);
-    }
-  }
-
-  return { solicitud, folio };
 }

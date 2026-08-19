@@ -12,7 +12,7 @@
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { normalizar } from '../utils/texto.js';
-import { supabase, registrarMensaje } from '../lib/supabase.js';
+import { uno, registrarMensaje } from '../lib/db.js';
 import { sendText } from '../lib/whatsapp.js';
 
 // Pistas de texto para mapear lo que escribe el cliente a una plaza.
@@ -72,11 +72,10 @@ export function resolverSucursal({ sucursalesConStock = [], ciudadEntrega = '' }
  */
 export async function idSucursal(clave) {
   if (!clave) return null;
-  const { data, error } = await supabase
-    .from('sucursales')
-    .select('id')
-    .eq('clave', clave.toUpperCase())
-    .maybeSingle();
+  const { data, error } = await uno(
+    'select id from sucursales where clave = $1',
+    [clave.toUpperCase()]
+  );
 
   if (error) {
     logger.warn('idSucursal falló:', error.message);

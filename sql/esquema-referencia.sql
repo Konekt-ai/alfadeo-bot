@@ -1,17 +1,16 @@
 -- =====================================================================
 -- ESQUEMA DE REFERENCIA — ALFA-DEO bot de WhatsApp
 -- =====================================================================
--- IMPORTANTE: el esquema REAL se administra directamente en Supabase.
--- Este archivo es SÓLO documentación de lo que el bot consume; el bot
--- NO crea ni migra tablas.
+-- IMPORTANTE: el esquema REAL vive en el PostgreSQL de la computadora del
+-- mostrador (localhost:5433, base `alfadeo`) y lo administran las
+-- migraciones del repo del panel. Este archivo es SÓLO documentación de lo
+-- que el bot consume; el bot NO crea ni migra tablas.
 --
--- La migración que agrega el catálogo farmacéutico, las sucursales y los
--- campos de facturación vive en el repo del panel:
+-- Si falta alguna tabla o la función buscar_productos, no se arregla desde
+-- aquí: se corren las migraciones del panel.
 --
---     alfadeo-panel/supabase/reunion-catalogo-sucursales.sql
---
--- Se ejecuta una sola vez desde Supabase → SQL Editor. Sin ella, el bot
--- no puede buscar productos ni decir en qué plaza hay existencia.
+-- Los permisos que el bot necesita sobre estas tablas están en
+-- sql/rol-bot.sql, en este mismo repo.
 -- =====================================================================
 
 -- ----------------------- ENUMS (referencia) --------------------------

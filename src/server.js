@@ -3,13 +3,24 @@
 import express from 'express';
 import { env, validarEntorno } from './config/env.js';
 import { logger } from './utils/logger.js';
-import { verifyWebhook, parseInbound } from './lib/whatsapp.js';
+import { verifyWebhook, firmaValida, parseInbound } from './lib/whatsapp.js';
 import { manejarMensaje } from './flows/abastecimiento.js';
 
 const app = express();
 
 // Parser de JSON con límite razonable. Meta envía JSON.
-app.use(express.json({ limit: '1mb' }));
+//
+// El `verify` guarda el cuerpo CRUDO antes de parsearlo: la firma de Meta se
+// calcula sobre esos bytes exactos, y `JSON.stringify(req.body)` no los
+// reproduce (cambia espacios y orden de claves).
+app.use(
+  express.json({
+    limit: '1mb',
+    verify: (req, _res, buf) => {
+      req.cuerpoCrudo = buf;
+    },
+  })
+);
 
 // ===================== Health check =====================
 app.get('/health', (_req, res) => {
@@ -33,6 +44,14 @@ app.get('/webhook', (req, res) => {
 // REGLA CRÍTICA: responder 200 de inmediato para que Meta no reintente,
 // y procesar los mensajes de forma asíncrona después.
 app.post('/webhook', (req, res) => {
+  // 0) ¿De verdad viene de Meta? Se comprueba ANTES de responder 200 y antes
+  //    de tocar la base: un 403 aquí es la única barrera contra mensajes
+  //    inventados por quien descubra la URL pública.
+  if (!firmaValida(req.cuerpoCrudo, req.get('x-hub-signature-256'))) {
+    logger.warn('POST /webhook con firma inválida: se descarta.');
+    return res.sendStatus(403);
+  }
+
   // 1) Responder ya.
   res.sendStatus(200);
 
@@ -56,6 +75,19 @@ app.post('/webhook', (req, res) => {
     // Nunca rompemos: el 200 ya se envió.
     logger.error('Error en POST /webhook:', err?.message ?? err);
   }
+});
+
+// ===================== Errores del parser =====================
+// Un cuerpo que no sea JSON válido hace que express.json lance ANTES de llegar
+// a la ruta. Sin este manejador, Express contesta 400 con una página HTML que
+// incluye el stack trace, y esa URL es pública: no hay por qué regalar rutas
+// internas del servidor a quien mande basura a propósito.
+app.use((err, _req, res, next) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    logger.warn('POST con JSON malformado: se descarta.');
+    return res.sendStatus(400);
+  }
+  return next(err);
 });
 
 // ===================== Raíz informativa =====================

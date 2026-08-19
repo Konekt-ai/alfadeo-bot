@@ -9,7 +9,7 @@
 //
 // El ranking vive en la función `buscar_productos` de Postgres para que el
 // panel y el bot ordenen exactamente igual.
-import { supabase } from '../lib/supabase.js';
+import { sql } from '../lib/db.js';
 import { logger } from '../utils/logger.js';
 import { normalizar, recortar } from '../utils/texto.js';
 import { env } from '../config/env.js';
@@ -108,7 +108,18 @@ export async function buscarProductos(consulta, limite = 5) {
 
   // Se piden más filas de las que se van a mostrar porque varias colapsan
   // al agrupar los lotes del mismo producto.
-  const { data, error } = await supabase.rpc('buscar_productos', { q, limite: limite * 5 });
+  // El ORDER BY va explícito. Con supabase.rpc el orden interno de la función
+  // llegaba tal cual; un `select * from f(...)` no lo garantiza, y agruparLotes
+  // depende de que la primera fila de cada grupo sea la de mejor score.
+  //
+  // El desempate por nombre no es adorno: es el mismo que trae la función por
+  // dentro (`order by b.score desc, b.nombre asc`). Sin él, dos productos con
+  // idéntico score podrían salir en distinto orden en cada consulta, y el
+  // cliente vería la lista de opciones cambiar entre un mensaje y el siguiente.
+  const { data, error } = await sql(
+    'select * from buscar_productos($1, $2) order by score desc, nombre asc',
+    [q, limite * 5]
+  );
 
   if (error) {
     logger.error('buscar_productos falló:', error.message);

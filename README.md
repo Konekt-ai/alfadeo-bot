@@ -2,7 +2,7 @@
 
 Webhook de bot de WhatsApp para **ALFA-DEO**, distribuidora farmacéutica B2B.
 Atiende consultas de producto, consulta el inventario real, registra solicitudes
-en **Supabase** y las rutea al asesor de la plaza que corresponde.
+en la base local y las rutea al asesor de la plaza que corresponde.
 
 > **Qué contesta el bot solo y qué no**
 >
@@ -20,26 +20,38 @@ en **Supabase** y las rutea al asesor de la plaza que corresponde.
 
 - Node.js 20 (ES Modules)
 - Express
-- `@supabase/supabase-js` (Service Role)
+- `pg` contra PostgreSQL 17 **en la misma computadora** (`localhost:5433`)
 - `fetch` nativo contra la **WhatsApp Cloud API oficial de Meta** (Graph API v21)
 - `dotenv` (sólo para entorno local)
 
 No se usan librerías no oficiales (Baileys, whatsapp-web.js, etc.).
 
-## ⚠️ Requisito previo: correr la migración
+## ⚠️ Requisito previo: la base
 
-El bot **no funciona** sin la migración del catálogo. Se corre **una sola vez**
-desde Supabase → SQL Editor:
+La base **ya no vive en la nube**. Es un PostgreSQL 17 en la computadora del
+mostrador, que escucha **sólo en `localhost`** y no está expuesto a internet.
+El bot y el panel comparten esa base y la misma función `buscar_productos`, que
+es donde vive el ranking para que los dos ordenen igual.
 
-```text
-alfadeo-panel/supabase/reunion-catalogo-sucursales.sql
+Las migraciones (catálogo desglosado, `sucursales`, existencia por plaza,
+campos de facturación) las corre el repo del **panel**, no éste.
+
+El bot necesita su propio usuario de base, con permisos mínimos:
+
+```bash
+psql -U postgres -p 5433 -d alfadeo -f sql/rol-bot.sql
 ```
 
-Agrega el desglose del catálogo (comercial / genérico / miligramos /
-presentación), la tabla `sucursales` (Guadalajara y Monterrey), la existencia por
-plaza y los campos de facturación. Es aditiva e idempotente.
+Ese rol alcanza seis tablas y una función; no puede borrar nada ni ver ventas
+ni inventario. **No uses el usuario `alfadeo` del panel para el bot.**
 
-Después, verifica que quedó bien:
+Comprueba que todo esté en su sitio:
+
+```bash
+npm run probar-base
+```
+
+Y que el catálogo esté bien cargado:
 
 ```bash
 npm run verificar-catalogo
@@ -52,7 +64,7 @@ alfadeo-bot/
 ├─ src/
 │  ├─ server.js                  # Express, monta rutas, escucha PORT
 │  ├─ config/env.js              # lee y valida variables de entorno
-│  ├─ lib/supabase.js            # cliente Supabase + registrarMensaje()
+│  ├─ lib/db.js                  # pool de PostgreSQL + registrarMensaje()
 │  ├─ lib/whatsapp.js            # sendText(), sendButtons(), parseInbound()
 │  ├─ lib/fechas.js              # calendario hábil y fecha de entrega
 │  ├─ flows/abastecimiento.js    # máquina de estados de la conversación
@@ -67,7 +79,8 @@ alfadeo-bot/
 │  └─ utils/{logger,texto}.js
 ├─ pruebas/logica.test.mjs       # suite de pruebas (npm test)
 ├─ scripts/
-│  ├─ verificar-catalogo.mjs     # revisa la migración contra la BD
+│  ├─ probar-base.mjs            # ¿alcanza la base y tiene permisos?
+│  ├─ verificar-catalogo.mjs     # revisa el catálogo contra la BD
 │  └─ simular-conversacion.mjs   # conversación completa sin mandar WhatsApps
 ├─ hosting/                      # para correrlo en la PC de la empresa
 │  ├─ README.md                  # guía de instalación paso a paso
@@ -82,7 +95,8 @@ alfadeo-bot/
 │  ├─ desinstalar.ps1
 │  └─ config-cloudflared.yml     # plantilla del túnel
 ├─ web/boton-whatsapp.html       # botón flotante para la página web
-├─ supabase/schema.sql           # esquema de REFERENCIA (no se ejecuta)
+├─ sql/rol-bot.sql               # usuario de base del bot, permisos mínimos
+├─ sql/esquema-referencia.sql    # esquema de REFERENCIA (no se ejecuta)
 ├─ .env.example
 └─ railway.json                  # despliegue (también hay Procfile)
 ```
@@ -92,7 +106,7 @@ alfadeo-bot/
 ```bash
 cp .env.example .env      # PowerShell: Copy-Item .env.example .env
 npm install
-npm test                  # 35 pruebas, no tocan la BD ni la API de Meta
+npm test                  # 44 pruebas, no tocan la BD ni la API de Meta
 npm start
 curl http://localhost:3000/health   # -> {"ok":true}
 ```
@@ -132,8 +146,8 @@ Responde `200` de inmediato y procesa en segundo plano.
 | `WHATSAPP_TOKEN` | Token de la app de Meta (preferible permanente de System User). |
 | `WHATSAPP_PHONE_NUMBER_ID` | **Phone Number ID** del número (no el número visible). |
 | `WHATSAPP_VERIFY_TOKEN` | Cadena que tú inventas; debe coincidir con la de Meta. |
-| `SUPABASE_URL` | URL del proyecto Supabase. |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Service Role Key** (no la anon key). Sólo en el servidor. |
+| `DATABASE_URL` | `postgresql://bot:CONTRASENA@localhost:5433/alfadeo`. Usa el rol de `sql/rol-bot.sql`. |
+| `META_APP_SECRET` | Secreto de la app de Meta. Sin él **no se valida la firma** de los webhooks. |
 | `INTERNAL_NOTIFY_NUMBERS` | Respaldo: reciben todas las solicitudes. Separados por coma. |
 | `RUTEO_ASESORES` | Asesor por plaza: `GDL:5213312345678,MTY:5218112345678`. |
 | `SUCURSAL_DEFAULT` | Plaza cuando no hay pistas. Default `GDL`. |
@@ -145,7 +159,7 @@ Responde `200` de inmediato y procesa en segundo plano.
 | `ENTREGA_DIAS_PROVEEDOR` | Días hábiles extra si hay que pedirlo a proveedor. Default `2`. |
 | `ZONA_HORARIA` | Default `America/Mexico_City`. |
 | `ESCALA_CANTIDAD_UMBRAL` | Piezas a partir de las cuales lo atiende una persona. Default `500`. |
-| `PORT` | Puerto local (Railway lo inyecta solo). Default `3000`. |
+| `PORT` | Puerto local del webhook. El panel ocupa el 3002. Default `3000`. |
 | `GRAPH_API_VERSION` | Versión de Graph API. Default `v21.0`. |
 
 ## Cómo conversa el bot
@@ -267,11 +281,17 @@ queda contestando con la versión anterior. Los otros comandos (`bot-reiniciar`,
 `bot-log`) y cómo dejar el SSH sin contraseña, en
 [hosting/README.md](hosting/README.md#operación-diaria).
 
-### En Railway (respaldo)
+### En Railway (ya no es un respaldo listo)
 
-El bot ya no vive aquí, pero `railway.json` y el `Procfile` se conservan para
-poder reactivarlo si la PC de la empresa se cae y hay que volver rápido. Meta
-entrega a **una sola** URL, así que reactivarlo es cambiar la Callback URL.
+`railway.json` y el `Procfile` siguen aquí, pero **ya no bastan para revivir el
+bot**. Antes la base estaba en la nube y Railway la alcanzaba desde cualquier
+lado; ahora `DATABASE_URL` apunta a `localhost:5433`, que desde Railway no
+existe.
+
+Para volver a tener un respaldo de verdad habría que resolver primero cómo
+alcanza la base desde fuera — y eso es justo lo que el cliente decidió no hacer.
+Se conservan los archivos por si algún día cambia esa decisión; hoy el respaldo
+real es que la computadora del mostrador vuelva a encender.
 
 1. Sube el repo a GitHub.
 2. Railway: **New Project → Deploy from GitHub repo**.
