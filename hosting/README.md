@@ -75,11 +75,18 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Y crea el usuario de base del bot, con permisos mínimos (una sola vez):
+Y prepara la base (una sola vez). En la computadora del mostrador el `psql`
+está en `C:\alfadeo\pgsql\bin\psql.exe`:
 
 ```powershell
+psql -U postgres -p 5433 -d alfadeo -f sql\arreglos-base.sql
 psql -U postgres -p 5433 -d alfadeo -f sql\rol-bot.sql
 ```
+
+`arreglos-base.sql` repone lo que la migración desde Supabase dejó en el
+camino: la identidad de `mensajes.id` y de `solicitudes.folio`, y el índice
+único de `clientes.telefono_wa`. Sin eso el bot atiende la conversación
+completa y falla justo al registrar la solicitud.
 
 Ese rol sólo alcanza las seis tablas que el bot usa y la función de búsqueda:
 no puede borrar nada, ni ver ventas, ni tocar inventario. **No pongas en
