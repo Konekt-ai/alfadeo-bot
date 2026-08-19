@@ -36,11 +36,17 @@ es donde vive el ranking para que los dos ordenen igual.
 Las migraciones (catálogo desglosado, `sucursales`, existencia por plaza,
 campos de facturación) las corre el repo del **panel**, no éste.
 
-El bot necesita su propio usuario de base, con permisos mínimos:
+Hay dos cosas que correr una sola vez, como superusuario:
 
 ```bash
+psql -U postgres -p 5433 -d alfadeo -f sql/arreglos-base.sql
 psql -U postgres -p 5433 -d alfadeo -f sql/rol-bot.sql
 ```
+
+`arreglos-base.sql` repone lo que la migración de Supabase a la base local dejó
+en el camino: la identidad de `mensajes.id` y de `solicitudes.folio`, y el
+índice único de `clientes.telefono_wa`. Sin eso el bot atiende la conversación
+entera y falla justo al registrar la solicitud. Es idempotente.
 
 Ese rol alcanza seis tablas y una función; no puede borrar nada ni ver ventas
 ni inventario. **No uses el usuario `alfadeo` del panel para el bot.**
